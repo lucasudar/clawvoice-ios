@@ -19,13 +19,12 @@ struct SettingsView: View {
                         ForEach(GeminiConfig.availableModels, id: \.self) { model in
                             Text(model).tag(model)
                         }
+                        // Custom entry if not in list
+                        if !GeminiConfig.availableModels.contains(settings.geminiModel) {
+                            Text(settings.geminiModel).tag(settings.geminiModel)
+                        }
                     }
                     .pickerStyle(.menu)
-                    TextField("or type manually", text: $settings.geminiModel)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
 
                     Picker("Voice", selection: $settings.voiceName) {
                         ForEach(GeminiConfig.availableVoices, id: \.self) {
