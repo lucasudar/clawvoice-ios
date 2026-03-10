@@ -23,6 +23,7 @@ final class GeminiLiveService: NSObject {
     func connect() {
         let apiKey = AppSettings.shared.geminiApiKey
         let model  = AppSettings.shared.geminiModel
+        print("🔌 [Gemini] Connecting, model=\(model), keyLen=\(apiKey.count)")
         guard !apiKey.isEmpty else {
             delegate?.geminiDidDisconnect(error: GeminiError.missingApiKey)
             return
@@ -102,6 +103,7 @@ final class GeminiLiveService: NSObject {
 
         if msg.setupComplete != nil {
             isConnected = true
+            print("✅ [Gemini] Setup complete — connected!")
             DispatchQueue.main.async { self.delegate?.geminiDidConnect() }
             return
         }

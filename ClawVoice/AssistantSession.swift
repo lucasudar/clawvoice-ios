@@ -38,6 +38,7 @@ final class AssistantSession: ObservableObject {
 
     @Published var state: State = .idle
     @Published var transcript: String = ""
+    @Published var lastError: String? = nil
 
     // MARK: - Private
 
@@ -69,7 +70,9 @@ final class AssistantSession: ObservableObject {
         }() else { return }
 
         transcript = ""
+        lastError = nil
         state = .connecting
+        print("🟡 [ClawVoice] Connecting to Gemini...")
         gemini.connect()
     }
 
@@ -135,8 +138,12 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         Task { @MainActor in
             self.audio.stopCapture()
             if let error {
-                self.state = .error(error.localizedDescription)
+                let msg = error.localizedDescription
+                print("❌ [ClawVoice] Gemini disconnected with error: \(msg)")
+                self.lastError = msg
+                self.state = .error(msg)
             } else {
+                print("ℹ️ [ClawVoice] Gemini disconnected cleanly")
                 self.state = .idle
             }
         }

@@ -98,6 +98,15 @@ struct ContentView: View {
             SettingsView()
                 .environmentObject(settings)
         }
+        .alert("Connection Error", isPresented: Binding(
+            get: { session.lastError != nil },
+            set: { if !$0 { session.lastError = nil } }
+        )) {
+            Button("Settings") { showSettings = true }
+            Button("OK", role: .cancel) { session.lastError = nil }
+        } message: {
+            Text(session.lastError ?? "")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .clawVoiceActivate)) { _ in
             session.start()
         }
