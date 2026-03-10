@@ -29,15 +29,14 @@ final class GeminiLiveService: NSObject {
             return
         }
 
-        // Gemini Live API — BidiGenerateContent WebSocket endpoint (model specified in setup message)
-        let urlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=\(apiKey)"
+        // Gemini Live API — BidiGenerateContent WebSocket endpoint
+        let urlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=\(apiKey)"
         guard let url = URL(string: urlString) else { return }
 
         urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         webSocketTask = urlSession?.webSocketTask(with: url)
         webSocketTask?.resume()
-
-        sendSetup()
+        // Setup is sent in urlSession(_:webSocketTask:didOpenWithProtocol:)
         receiveLoop()
     }
 
@@ -146,16 +145,28 @@ final class GeminiLiveService: NSObject {
 // MARK: - URLSessionWebSocketDelegate
 
 extension GeminiLiveService: URLSessionWebSocketDelegate {
+
+    // Called when WebSocket handshake is complete — NOW safe to send setup
+    func urlSession(_ session: URLSession,
+                    webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol protocol: String?) {
+        print("🟢 [Gemini] WebSocket opened, sending setup...")
+        sendSetup()
+    }
+
     func urlSession(_ session: URLSession,
                     webSocketTask: URLSessionWebSocketTask,
                     didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
                     reason: Data?) {
+        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
+        print("🔴 [Gemini] WebSocket closed: code=\(closeCode.rawValue) reason=\(reasonStr)")
         isConnected = false
         DispatchQueue.main.async { self.delegate?.geminiDidDisconnect(error: nil) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         if let error {
+            print("🔴 [Gemini] Task completed with error: \(error)")
             isConnected = false
             let friendly = friendlyError(error)
             DispatchQueue.main.async { self.delegate?.geminiDidDisconnect(error: friendly) }
