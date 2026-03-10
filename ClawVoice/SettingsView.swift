@@ -15,9 +15,29 @@ struct SettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
 
-                    Picker("Model", selection: $settings.geminiModel) {
-                        ForEach(GeminiConfig.availableModels, id: \.self) {
-                            Text($0).tag($0)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Model").font(.caption).foregroundColor(.secondary)
+                        TextField("e.g. gemini-2.0-flash-live-001", text: $settings.geminiModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .font(.system(size: 13, design: .monospaced))
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Quick select:").font(.caption).foregroundColor(.secondary)
+                        ForEach(GeminiConfig.availableModels, id: \.self) { model in
+                            Button {
+                                settings.geminiModel = model
+                            } label: {
+                                HStack {
+                                    Text(model)
+                                        .font(.system(size: 12, design: .monospaced))
+                                        .foregroundColor(.primary)
+                                    Spacer()
+                                    if settings.geminiModel == model {
+                                        Image(systemName: "checkmark").foregroundColor(.blue)
+                                    }
+                                }
+                            }
                         }
                     }
 

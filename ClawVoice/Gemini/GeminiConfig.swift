@@ -45,10 +45,13 @@ struct GeminiConfig {
     // Available voice options for Settings UI
     static let availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
 
-    // Available models for Live API
-    // v1alpha endpoint: gemini-2.0-flash-live-001 (stable)
+    // Models to try (Google renames/breaks these frequently)
+    // Endpoint is always v1alpha BidiGenerateContent
     static let availableModels = [
         "gemini-2.0-flash-live-001",
+        "gemini-live-2.0-flash-001",
+        "gemini-2.0-flash-exp",
+        "gemini-live-2.5-flash",
         "gemini-2.5-flash-native-audio-preview-12-2025",
     ]
 }
