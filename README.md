@@ -11,7 +11,7 @@ No video. No camera. No continuous streaming. Just voice.
 <p align="center">
   <img src="assets/screenshot-main.png" width="220" alt="Main screen"/>
   &nbsp;&nbsp;&nbsp;
-  <img src="assets/screenshot-settings.png" width="220" alt="Settings screen"/>
+  <img src="assets/screenshot-settings.png?v=2" width="220" alt="Settings screen"/>
 </p>
 
 ---
