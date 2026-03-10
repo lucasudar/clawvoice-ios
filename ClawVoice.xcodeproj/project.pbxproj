@@ -20,6 +20,7 @@
 		3BA6AD1A508347F49D1E8E68 /* ToolCallRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5339E6913614DCB86D47C15 /* ToolCallRouter.swift */; };
 		72C07683209C4462BBE71068 /* AssistantIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B2D6834523F4C9B9B2220C0 /* AssistantIntent.swift */; };
 		46962468C95B4EABBC8CCEFB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D81D0AAA570A48B4A7E6EF3E /* Assets.xcassets */; };
+		680B3FE0FC8848FEA91CE0EE /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A553BA5E874EDCA1ED7D92 /* Secrets.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -38,6 +39,7 @@
 		D81D0AAA570A48B4A7E6EF3E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F41A31D186A84CC3883C70C5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		18E0CFAED7B342CBB61CFEC1 /* ClawVoice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClawVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		67A553BA5E874EDCA1ED7D92 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -59,6 +61,7 @@
 				537DF919EE4241BCAE62B7F9 /* SettingsView.swift */,
 				7AE2CC5AD96A46179E371792 /* AppSettings.swift */,
 				7F742F36D654400B93CC3F55 /* AssistantSession.swift */,
+				67A553BA5E874EDCA1ED7D92 /* Secrets.swift */,
 				157D52888F504ABD8123156F /* Audio */,
 				9706E5C861114E1BA06339ED /* Gemini */,
 				2AF3B40BE17346A1BDFA09FB /* OpenClaw */,
@@ -194,6 +197,7 @@
 				04FC810201C84BB986E84BDC /* OpenClawBridge.swift in Sources */,
 				3BA6AD1A508347F49D1E8E68 /* ToolCallRouter.swift in Sources */,
 				72C07683209C4462BBE71068 /* AssistantIntent.swift in Sources */,
+				680B3FE0FC8848FEA91CE0EE /* Secrets.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

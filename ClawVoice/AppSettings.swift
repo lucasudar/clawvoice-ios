@@ -35,11 +35,11 @@ final class AppSettings: ObservableObject {
 
     private init() {
         let ud = UserDefaults.standard
-        geminiApiKey  = ud.string(forKey: "geminiApiKey")  ?? Secrets.geminiApiKey
-        openClawHost  = ud.string(forKey: "openClawHost")  ?? Secrets.openClawHost
+        geminiApiKey  = ud.string(forKey: "geminiApiKey")  ?? ""
+        openClawHost  = ud.string(forKey: "openClawHost")  ?? ""
         openClawPort  = ud.integer(forKey: "openClawPort") != 0
-                        ? ud.integer(forKey: "openClawPort") : Secrets.openClawPort
-        openClawToken = ud.string(forKey: "openClawToken") ?? Secrets.openClawToken
+                        ? ud.integer(forKey: "openClawPort") : 443
+        openClawToken = ud.string(forKey: "openClawToken") ?? ""
         assistantName = ud.string(forKey: "assistantName") ?? "Assistant"
         geminiModel   = ud.string(forKey: "geminiModel")   ?? "gemini-2.0-flash-live-001"
         voiceName     = ud.string(forKey: "voiceName")     ?? "Aoede"
