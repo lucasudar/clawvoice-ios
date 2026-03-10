@@ -50,6 +50,11 @@ final class AssistantSession: ObservableObject {
     private let router = ToolCallRouter()
     private var siriObserver: NSObjectProtocol?
 
+    // Auto-reconnect
+    private var reconnectAttempts = 0
+    private let maxReconnectAttempts = 5
+    private var reconnectTask: Task<Void, Never>?
+
     // MARK: - Init
 
     init() {
@@ -87,6 +92,8 @@ final class AssistantSession: ObservableObject {
             if case .error = state { return true } else { return false }
         }() else { return }
 
+        reconnectAttempts = 0
+        reconnectTask?.cancel()
         transcript = ""
         lastError = nil
         state = .connecting
@@ -95,9 +102,31 @@ final class AssistantSession: ObservableObject {
     }
 
     func stop() {
+        reconnectTask?.cancel()
+        reconnectAttempts = 0
         gemini.disconnect()
         audio.stopCapture()
         state = .idle
+    }
+
+    private func scheduleReconnect() {
+        guard reconnectAttempts < maxReconnectAttempts else {
+            print("❌ [ClawVoice] Max reconnect attempts reached, giving up")
+            return
+        }
+        reconnectAttempts += 1
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        let delay = Double(1 << (reconnectAttempts - 1))
+        print("🔁 [ClawVoice] Reconnecting in \(Int(delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))...")
+        state = .connecting
+
+        reconnectTask = Task {
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self.gemini.connect()
+            }
+        }
     }
 
     // MARK: - Private
@@ -119,6 +148,7 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidConnect() {
         Task { @MainActor in
+            self.reconnectAttempts = 0  // reset on successful connect
             self.state = .listening
             do {
                 try self.audio.startCapture { [weak self] chunk in
@@ -169,8 +199,13 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             if let error {
                 let msg = error.localizedDescription
                 print("❌ [ClawVoice] Gemini disconnected with error: \(msg)")
-                self.lastError = msg
-                self.state = .error(msg)
+                // Auto-reconnect if user was active (not manually stopped)
+                if self.state != .idle {
+                    self.scheduleReconnect()
+                } else {
+                    self.lastError = msg
+                    self.state = .error(msg)
+                }
             } else {
                 print("ℹ️ [ClawVoice] Gemini disconnected cleanly")
                 self.state = .idle
