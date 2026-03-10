@@ -67,6 +67,7 @@
 				F41A31D186A84CC3883C70C5 /* Info.plist */,
 				8260EC3D90B4408691A1CF43 /* Products */,
 			);
+			path = ClawVoice;
 			sourceTree = "<group>";
 		};
 		8260EC3D90B4408691A1CF43 /* Products */ = {
