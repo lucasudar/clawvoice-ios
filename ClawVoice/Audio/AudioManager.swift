@@ -1,114 +1,169 @@
 import AVFoundation
 import Foundation
 
-/// Handles microphone capture (PCM 16kHz) and speaker playback (PCM 24kHz).
+/// Handles microphone capture (PCM Int16 16kHz chunks) and speaker playback (PCM Int16 24kHz → Float32).
 final class AudioManager {
 
     // MARK: - Types
 
     typealias AudioChunkHandler = (Data) -> Void
 
+    // MARK: - Constants
+
+    private let inputSampleRate:  Double = 16000
+    private let outputSampleRate: Double = 24000
+    private let channels: UInt32 = 1
+    // Accumulate ~100ms of audio before sending to Gemini (reduces API call frequency)
+    private let minSendBytes = 3200  // 100ms @ 16kHz mono Int16 = 1600 frames × 2 bytes
+
     // MARK: - Properties
 
-    private let engine = AVAudioEngine()
-    private let playerNode = AVAudioPlayerNode()
-    private let outputFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                             sampleRate: 24000,
-                                             channels: 1,
-                                             interleaved: true)!
-    private var inputFormat: AVAudioFormat?
+    private let audioEngine    = AVAudioEngine()
+    private let playerNode     = AVAudioPlayerNode()
+    private var isCapturing    = false
+    private var isMuted        = false  // mute mic while model is speaking (echo prevention)
+
     private var chunkHandler: AudioChunkHandler?
-    private var isCapturing = false
+    private let sendQueue      = DispatchQueue(label: "clawvoice.audio.send", qos: .userInitiated)
+    private var accumulated    = Data()
 
     // MARK: - Public API
 
+    /// Start capturing mic audio. Calls `onChunk` with ~100ms PCM Int16 16kHz chunks.
     func startCapture(onChunk: @escaping AudioChunkHandler) throws {
         guard !isCapturing else { return }
         chunkHandler = onChunk
+        accumulated  = Data()
 
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord,
                                 mode: .voiceChat,
-                                options: [.defaultToSpeaker, .allowBluetooth])
+                                options: [.defaultToSpeaker, .allowBluetooth, .mixWithOthers])
+        try session.setPreferredSampleRate(inputSampleRate)
+        try session.setPreferredIOBufferDuration(0.064)
         try session.setActive(true)
 
-        let inputNode = engine.inputNode
-        let hwFormat  = inputNode.outputFormat(forBus: 0)
-        inputFormat   = hwFormat
+        // Connect player to main mixer using Float32 @ 24kHz
+        let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                         sampleRate: outputSampleRate,
+                                         channels: channels,
+                                         interleaved: false)!
+        audioEngine.attach(playerNode)
+        audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: playerFormat)
 
-        // Target capture format: 16kHz mono Int16
-        let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                         sampleRate: 16000,
-                                         channels: 1,
-                                         interleaved: true)!
+        // Tap in native hardware format (Float32), then convert manually
+        let inputNode       = audioEngine.inputNode
+        let nativeFormat    = inputNode.outputFormat(forBus: 0)
+        let needsResample   = nativeFormat.sampleRate != inputSampleRate || nativeFormat.channelCount != channels
 
-        // Install a converter tap
-        guard let converter = AVAudioConverter(from: hwFormat, to: targetFormat) else {
-            throw AudioError.converterInitFailed
+        let resampleFormat  = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: inputSampleRate,
+                                             channels: channels,
+                                             interleaved: false)!
+        let converter       = needsResample ? AVAudioConverter(from: nativeFormat, to: resampleFormat) : nil
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            guard let self, !self.isMuted else { return }
+
+            let pcmData: Data
+            if let converter {
+                guard let resampled = self.convert(buffer, using: converter, to: resampleFormat) else { return }
+                pcmData = self.float32ToInt16Data(resampled)
+            } else {
+                pcmData = self.float32ToInt16Data(buffer)
+            }
+
+            self.sendQueue.async {
+                self.accumulated.append(pcmData)
+                if self.accumulated.count >= self.minSendBytes {
+                    let chunk = self.accumulated
+                    self.accumulated = Data()
+                    self.chunkHandler?(chunk)
+                }
+            }
         }
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: hwFormat) { [weak self] buffer, _ in
-            guard let self else { return }
-
-            let frameCapacity = AVAudioFrameCount(
-                Double(buffer.frameLength) * 16000.0 / hwFormat.sampleRate
-            )
-            guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat,
-                                                   frameCapacity: frameCapacity) else { return }
-            var error: NSError?
-            converter.convert(to: converted, error: &error) { _, outStatus in
-                outStatus.pointee = .haveData
-                return buffer
-            }
-            if error == nil, converted.frameLength > 0 {
-                let data = Data(bytes: converted.int16ChannelData![0],
-                                count: Int(converted.frameLength) * 2)
-                self.chunkHandler?(data)
-            }
-        }
-
-        engine.attach(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: outputFormat)
-        engine.prepare()
-        try engine.start()
+        try audioEngine.start()
         playerNode.play()
         isCapturing = true
     }
 
     func stopCapture() {
         guard isCapturing else { return }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
         playerNode.stop()
-        try? AVAudioSession.sharedInstance().setActive(false)
+        audioEngine.stop()
+        audioEngine.detach(playerNode)
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         isCapturing = false
     }
 
-    /// Enqueue a chunk of PCM Int16 24kHz audio for playback.
+    /// Mute mic while Gemini is speaking (prevents echo feedback).
+    func setMuted(_ muted: Bool) {
+        isMuted = muted
+    }
+
+    /// Schedule a chunk of PCM Int16 24kHz audio for gapless playback.
     func playAudio(_ data: Data) {
-        guard let buffer = pcmBuffer(from: data) else { return }
+        guard isCapturing, !data.isEmpty else { return }
+
+        let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                          sampleRate: outputSampleRate,
+                                          channels: channels,
+                                          interleaved: false)!
+        let frameCount = UInt32(data.count) / 2  // Int16 = 2 bytes per frame
+        guard frameCount > 0,
+              let buffer = AVAudioPCMBuffer(pcmFormat: playerFormat, frameCapacity: frameCount)
+        else { return }
+
+        buffer.frameLength = frameCount
+        guard let floatPtr = buffer.floatChannelData else { return }
+
+        // Convert Int16 → Float32 (normalize to [-1, 1])
+        data.withUnsafeBytes { raw in
+            guard let int16Ptr = raw.bindMemory(to: Int16.self).baseAddress else { return }
+            for i in 0..<Int(frameCount) {
+                floatPtr[0][i] = Float(int16Ptr[i]) / Float(Int16.max)
+            }
+        }
+
         playerNode.scheduleBuffer(buffer)
         if !playerNode.isPlaying { playerNode.play() }
     }
 
     // MARK: - Private helpers
 
-    private func pcmBuffer(from data: Data) -> AVAudioPCMBuffer? {
-        let frameCount = AVAudioFrameCount(data.count / 2)
-        guard frameCount > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: frameCount)
-        else { return nil }
-        buffer.frameLength = frameCount
-        data.withUnsafeBytes { ptr in
-            guard let src = ptr.baseAddress else { return }
-            memcpy(buffer.int16ChannelData![0], src, data.count)
+    private func convert(_ buffer: AVAudioPCMBuffer,
+                         using converter: AVAudioConverter,
+                         to format: AVAudioFormat) -> AVAudioPCMBuffer? {
+        let ratio = format.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio + 1)
+        guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
+        var error: NSError?
+        var filled = false
+        converter.convert(to: out, error: &error) { _, status in
+            if !filled {
+                filled = true
+                status.pointee = .haveData
+                return buffer
+            }
+            status.pointee = .noDataNow
+            return nil
         }
-        return buffer
+        return error == nil && out.frameLength > 0 ? out : nil
     }
 
-    // MARK: - Errors
-
-    enum AudioError: Error {
-        case converterInitFailed
+    private func float32ToInt16Data(_ buffer: AVAudioPCMBuffer) -> Data {
+        guard let floatPtr = buffer.floatChannelData else { return Data() }
+        let frameCount = Int(buffer.frameLength)
+        var result = Data(count: frameCount * 2)
+        result.withUnsafeMutableBytes { raw in
+            guard let int16Ptr = raw.bindMemory(to: Int16.self).baseAddress else { return }
+            for i in 0..<frameCount {
+                let clamped = max(-1.0, min(1.0, floatPtr[0][i]))
+                int16Ptr[i] = Int16(clamped * Float(Int16.max))
+            }
+        }
+        return result
     }
 }

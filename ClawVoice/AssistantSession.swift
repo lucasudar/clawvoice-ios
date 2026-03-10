@@ -114,19 +114,28 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAudio(_ data: Data) {
         Task { @MainActor in
-            self.state = .speaking
+            if self.state != .speaking {
+                self.state = .speaking
+                self.audio.setMuted(true)  // mute mic while model speaks (echo prevention)
+            }
             self.audio.playAudio(data)
         }
     }
 
     nonisolated func geminiDidReceiveText(_ text: String) {
         Task { @MainActor in
+            // Any text (transcription) means user is speaking → unmute
+            if text.hasPrefix("You: ") {
+                self.audio.setMuted(false)
+                self.state = .listening
+            }
             self.transcript += text
         }
     }
 
     nonisolated func geminiDidReceiveToolCall(id: String, name: String, args: [String: String]) {
         Task { @MainActor in
+            self.audio.setMuted(false)  // unmute when model calls a tool (stopped speaking)
             self.state = .thinking
             let result = await self.router.handle(id: id, name: name, args: args)
             self.gemini.sendToolResponse(id: id, output: result)
