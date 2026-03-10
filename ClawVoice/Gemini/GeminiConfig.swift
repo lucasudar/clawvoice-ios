@@ -45,9 +45,9 @@ struct GeminiConfig {
     // Available voice options for Settings UI
     static let availableVoices = ["Aoede", "Charon", "Fenrir", "Kore", "Puck"]
 
-    // Available models
+    // Available models (Live API only)
     static let availableModels = [
+        "gemini-2.5-flash-native-audio-preview-12-2025",
         "gemini-2.0-flash-live-001",
-        "gemini-2.0-pro-live-001",
     ]
 }

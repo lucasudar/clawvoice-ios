@@ -9,6 +9,7 @@ protocol GeminiLiveServiceDelegate: AnyObject {
 }
 
 /// WebSocket client for Gemini Live API (audio-only, no video).
+@MainActor
 final class GeminiLiveService: NSObject {
 
     // MARK: - Properties
@@ -16,179 +17,268 @@ final class GeminiLiveService: NSObject {
     weak var delegate: GeminiLiveServiceDelegate?
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
-    private var isConnected = false
+    private var receiveTask: Task<Void, Never>?
+    private let wsDelegate = WebSocketDelegate()
+    private let sendQueue = DispatchQueue(label: "clawvoice.gemini.send", qos: .userInitiated)
 
     // MARK: - Connect / Disconnect
 
     func connect() {
         let apiKey = AppSettings.shared.geminiApiKey
-        let model  = AppSettings.shared.geminiModel
-        print("🔌 [Gemini] Connecting, model=\(model), keyLen=\(apiKey.count)")
+        print("🔌 [Gemini] Connecting, model=\(AppSettings.shared.geminiModel), keyLen=\(apiKey.count)")
+
         guard !apiKey.isEmpty else {
-            delegate?.geminiDidDisconnect(error: GeminiError.missingApiKey)
+            delegate?.geminiDidDisconnect(error: makeError("Gemini API key is not configured. Open Settings ⚙️"))
             return
         }
 
-        // Gemini Live API — BidiGenerateContent WebSocket endpoint
-        let urlString = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=\(apiKey)"
-        guard let url = URL(string: urlString) else { return }
+        let baseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+        guard let url = URL(string: "\(baseURL)?key=\(apiKey)") else { return }
 
-        urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        urlSession = URLSession(configuration: config, delegate: wsDelegate, delegateQueue: nil)
+
+        wsDelegate.onOpen = { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                print("🟢 [Gemini] WebSocket opened — sending setup...")
+                self.sendSetup()
+                self.startReceiving()
+            }
+        }
+
+        wsDelegate.onClose = { [weak self] code, reason in
+            guard let self else { return }
+            let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
+            print("🔴 [Gemini] WebSocket closed: code=\(code.rawValue) reason=\(r)")
+            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: nil) }
+        }
+
+        wsDelegate.onError = { [weak self] error in
+            guard let self else { return }
+            let msg = error?.localizedDescription ?? "Unknown error"
+            print("🔴 [Gemini] Error: \(msg)")
+            let friendly = self.friendlyError(msg)
+            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: friendly) }
+        }
+
         webSocketTask = urlSession?.webSocketTask(with: url)
         webSocketTask?.resume()
-        // Setup is sent in urlSession(_:webSocketTask:didOpenWithProtocol:)
-        receiveLoop()
     }
 
     func disconnect() {
-        isConnected = false
+        receiveTask?.cancel()
+        receiveTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
+        wsDelegate.onOpen = nil
+        wsDelegate.onClose = nil
+        wsDelegate.onError = nil
     }
 
     // MARK: - Send
 
     func sendAudio(_ data: Data) {
-        guard isConnected else { return }
-        let b64 = data.base64EncodedString()
-        let msg = GeminiAudioMessage(
-            realtimeInput: .init(mediaChunks: [.init(data: b64, mimeType: "audio/pcm;rate=16000")])
-        )
-        send(msg)
+        sendQueue.async { [weak self] in
+            let json: [String: Any] = [
+                "realtimeInput": [
+                    "audio": [
+                        "mimeType": "audio/pcm;rate=16000",
+                        "data": data.base64EncodedString()
+                    ]
+                ]
+            ]
+            self?.sendJSON(json)
+        }
     }
 
     func sendToolResponse(id: String, output: String) {
-        let msg = GeminiToolResponseMessage(
-            toolResponse: .init(functionResponses: [.init(id: id, response: .init(output: output))])
-        )
-        send(msg)
+        sendQueue.async { [weak self] in
+            let json: [String: Any] = [
+                "toolResponse": [
+                    "functionResponses": [
+                        ["id": id, "response": ["output": output]]
+                    ]
+                ]
+            ]
+            self?.sendJSON(json)
+        }
     }
 
     // MARK: - Private
 
     private func sendSetup() {
-        send(GeminiConfig.buildSetupMessage())
+        let settings = AppSettings.shared
+        let json: [String: Any] = [
+            "setup": [
+                "model": "models/\(settings.geminiModel)",
+                "generationConfig": [
+                    "responseModalities": ["AUDIO"],
+                    "thinkingConfig": ["thinkingBudget": 0]
+                ],
+                "systemInstruction": [
+                    "parts": [["text": settings.systemPrompt]]
+                ],
+                "tools": [
+                    ["functionDeclarations": [
+                        [
+                            "name": "execute",
+                            "description": "Execute any task using OpenClaw: send messages, search the web, check calendar, control smart home, manage notes, and more. Use this whenever the user asks you to DO something.",
+                            "parameters": [
+                                "type": "object",
+                                "properties": [
+                                    "task": [
+                                        "type": "string",
+                                        "description": "Clear description of what to do, with all relevant context."
+                                    ]
+                                ],
+                                "required": ["task"]
+                            ]
+                        ]
+                    ]]
+                ],
+                "realtimeInputConfig": [
+                    "automaticActivityDetection": [
+                        "disabled": false,
+                        "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
+                        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
+                        "silenceDurationMs": 500,
+                        "prefixPaddingMs": 40
+                    ],
+                    "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
+                    "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
+                ],
+                "inputAudioTranscription": [String: Any](),
+                "outputAudioTranscription": [String: Any]()
+            ]
+        ]
+        sendJSON(json)
     }
 
-    private func send<T: Encodable>(_ value: T) {
-        guard let data = try? JSONEncoder().encode(value),
-              let json = String(data: data, encoding: .utf8) else { return }
-        webSocketTask?.send(.string(json)) { _ in }
+    private func sendJSON(_ json: [String: Any]) {
+        guard let data = try? JSONSerialization.data(withJSONObject: json),
+              let string = String(data: data, encoding: .utf8) else { return }
+        webSocketTask?.send(.string(string)) { _ in }
     }
 
-    private func receiveLoop() {
-        webSocketTask?.receive { [weak self] result in
+    private func startReceiving() {
+        receiveTask = Task { [weak self] in
             guard let self else { return }
-            switch result {
-            case .failure(let err):
-                self.delegate?.geminiDidDisconnect(error: err)
-            case .success(let message):
-                self.handle(message)
-                if self.isConnected { self.receiveLoop() }
+            while !Task.isCancelled {
+                guard let task = await self.webSocketTask else { break }
+                do {
+                    let message = try await task.receive()
+                    var text: String?
+                    switch message {
+                    case .string(let s): text = s
+                    case .data(let d):   text = String(data: d, encoding: .utf8)
+                    @unknown default:    break
+                    }
+                    if let text { await self.handleMessage(text) }
+                } catch {
+                    if !Task.isCancelled {
+                        let msg = error.localizedDescription
+                        await MainActor.run {
+                            self.delegate?.geminiDidDisconnect(error: self.friendlyError(msg))
+                        }
+                    }
+                    break
+                }
             }
         }
     }
 
-    private func handle(_ message: URLSessionWebSocketTask.Message) {
-        var jsonData: Data?
-        switch message {
-        case .string(let str): jsonData = str.data(using: .utf8)
-        case .data(let d):     jsonData = d
-        @unknown default:      return
-        }
-        guard let data = jsonData,
-              let msg = try? JSONDecoder().decode(GeminiServerMessage.self, from: data)
-        else { return }
+    private func handleMessage(_ text: String) async {
+        guard let data = text.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
 
-        if msg.setupComplete != nil {
-            isConnected = true
-            print("✅ [Gemini] Setup complete — connected!")
-            DispatchQueue.main.async { self.delegate?.geminiDidConnect() }
+        if json["setupComplete"] != nil {
+            print("✅ [Gemini] Setup complete — ready!")
+            await MainActor.run { self.delegate?.geminiDidConnect() }
             return
         }
 
-        if let content = msg.serverContent {
-            if let parts = content.modelTurn?.parts {
+        if let toolCall = json["toolCall"] as? [String: Any],
+           let calls = toolCall["functionCalls"] as? [[String: Any]] {
+            for call in calls {
+                guard let id   = call["id"]   as? String,
+                      let name = call["name"] as? String else { continue }
+                let args = (call["args"] as? [String: Any])?.compactMapValues { $0 as? String } ?? [:]
+                print("🔧 [Gemini] Tool call: \(name)(\(args))")
+                await MainActor.run { self.delegate?.geminiDidReceiveToolCall(id: id, name: name, args: args) }
+            }
+            return
+        }
+
+        if let serverContent = json["serverContent"] as? [String: Any] {
+            if let modelTurn = serverContent["modelTurn"] as? [String: Any],
+               let parts = modelTurn["parts"] as? [[String: Any]] {
                 for part in parts {
-                    if let b64 = part.inlineData?.data,
+                    if let inlineData = part["inlineData"] as? [String: Any],
+                       let mimeType = inlineData["mimeType"] as? String,
+                       mimeType.hasPrefix("audio/pcm"),
+                       let b64 = inlineData["data"] as? String,
                        let audioData = Data(base64Encoded: b64) {
-                        DispatchQueue.main.async { self.delegate?.geminiDidReceiveAudio(audioData) }
+                        await MainActor.run { self.delegate?.geminiDidReceiveAudio(audioData) }
                     }
-                    if let text = part.text, !text.isEmpty {
-                        DispatchQueue.main.async { self.delegate?.geminiDidReceiveText(text) }
+                    if let text = part["text"] as? String, !text.isEmpty {
+                        await MainActor.run { self.delegate?.geminiDidReceiveText(text) }
                     }
                 }
             }
-        }
-
-        if let toolCall = msg.toolCall {
-            for call in toolCall.functionCalls {
-                DispatchQueue.main.async {
-                    self.delegate?.geminiDidReceiveToolCall(id: call.id, name: call.name, args: call.args)
-                }
+            // Transcription
+            if let t = serverContent["inputTranscription"] as? [String: Any],
+               let txt = t["text"] as? String, !txt.isEmpty {
+                print("🎙 You: \(txt)")
+                await MainActor.run { self.delegate?.geminiDidReceiveText("You: \(txt)\n") }
+            }
+            if let t = serverContent["outputTranscription"] as? [String: Any],
+               let txt = t["text"] as? String, !txt.isEmpty {
+                print("🤖 AI: \(txt)")
             }
         }
     }
 
-    // MARK: - Errors
+    // MARK: - Helpers
 
-    enum GeminiError: LocalizedError {
-        case missingApiKey
-        var errorDescription: String? {
-            switch self {
-            case .missingApiKey: return "Gemini API key is not configured. Go to Settings."
-            }
+    private func friendlyError(_ msg: String) -> Error {
+        let friendly: String
+        if msg.contains("bad response") || msg.contains("badServerResponse") {
+            friendly = "Gemini rejected connection — check your API key in Settings ⚙️"
+        } else if msg.contains("not connected") || msg.contains("Socket") {
+            friendly = "Gemini connection failed — check your internet and API key ⚙️"
+        } else if msg.contains("timed out") {
+            friendly = "Connection to Gemini timed out"
+        } else {
+            friendly = "Gemini: \(msg)"
         }
+        return makeError(friendly)
+    }
+
+    private func makeError(_ msg: String) -> Error {
+        NSError(domain: "ClawVoice.Gemini", code: 0, userInfo: [NSLocalizedDescriptionKey: msg])
     }
 }
 
-// MARK: - URLSessionWebSocketDelegate
+// MARK: - WebSocket Delegate (non-isolated helper)
 
-extension GeminiLiveService: URLSessionWebSocketDelegate {
+private class WebSocketDelegate: NSObject, URLSessionWebSocketDelegate {
+    var onOpen:  ((String?) -> Void)?
+    var onClose: ((URLSessionWebSocketTask.CloseCode, Data?) -> Void)?
+    var onError: ((Error?) -> Void)?
 
-    // Called when WebSocket handshake is complete — NOW safe to send setup
-    func urlSession(_ session: URLSession,
-                    webSocketTask: URLSessionWebSocketTask,
-                    didOpenWithProtocol protocol: String?) {
-        print("🟢 [Gemini] WebSocket opened, sending setup...")
-        sendSetup()
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didOpenWithProtocol proto: String?) {
+        onOpen?(proto)
     }
 
-    func urlSession(_ session: URLSession,
-                    webSocketTask: URLSessionWebSocketTask,
-                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
-                    reason: Data?) {
-        let reasonStr = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
-        print("🔴 [Gemini] WebSocket closed: code=\(closeCode.rawValue) reason=\(reasonStr)")
-        isConnected = false
-        DispatchQueue.main.async { self.delegate?.geminiDidDisconnect(error: nil) }
+    func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
+                    didCloseWith closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?) {
+        onClose?(closeCode, reason)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let error {
-            print("🔴 [Gemini] Task completed with error: \(error)")
-            isConnected = false
-            let friendly = friendlyError(error)
-            DispatchQueue.main.async { self.delegate?.geminiDidDisconnect(error: friendly) }
-        }
-    }
-
-    private func friendlyError(_ error: Error) -> Error {
-        let msg: String
-        if let urlErr = error as? URLError {
-            switch urlErr.code {
-            case .badServerResponse:
-                msg = "Gemini rejected the connection — check your API key in Settings ⚙️"
-            case .notConnectedToInternet, .networkConnectionLost:
-                msg = "No internet connection"
-            case .timedOut:
-                msg = "Connection to Gemini timed out"
-            default:
-                msg = "Gemini error: \(urlErr.localizedDescription)"
-            }
-        } else {
-            msg = error.localizedDescription
-        }
-        return NSError(domain: "ClawVoice", code: 0, userInfo: [NSLocalizedDescriptionKey: msg])
+        if let error { onError?(error) }
     }
 }
