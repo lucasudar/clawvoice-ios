@@ -32,7 +32,7 @@ final class GeminiLiveService: NSObject {
             return
         }
 
-        let baseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+        let baseURL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
         guard let url = URL(string: "\(baseURL)?key=\(apiKey)") else { return }
 
         let config = URLSessionConfiguration.default
