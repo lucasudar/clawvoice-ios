@@ -18,12 +18,12 @@ final class AssistantSession: ObservableObject {
 
         var label: String {
             switch self {
-            case .idle:         return "Tap to talk"
-            case .connecting:   return "Connecting…"
-            case .listening:    return "Listening…"
-            case .paused:       return "Paused — tap to resume"
-            case .thinking:     return "Thinking…"
-            case .speaking:     return "Speaking…"
+            case .idle:         return "Нажми чтобы говорить"
+            case .connecting:   return "Подключаюсь…"
+            case .listening:    return "Слушаю…"
+            case .paused:       return "Пауза · нажми чтобы продолжить"
+            case .thinking:     return "Выполняю…"
+            case .speaking:     return "Говорю…"
             case .error(let e): return e
             }
         }
@@ -41,6 +41,7 @@ final class AssistantSession: ObservableObject {
     @Published var state: State = .idle
     @Published var transcript: String = ""
     @Published var lastError: String? = nil
+    @Published var currentTask: String? = nil  // shown while executing tool calls
 
     // MARK: - Private
 
@@ -152,9 +153,11 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveToolCall(id: String, name: String, args: [String: String]) {
         Task { @MainActor in
-            self.audio.setMuted(false)  // unmute when model calls a tool (stopped speaking)
+            self.audio.setMuted(false)
             self.state = .thinking
+            self.currentTask = args["task"] ?? name
             let result = await self.router.handle(id: id, name: name, args: args)
+            self.currentTask = nil
             self.gemini.sendToolResponse(id: id, output: result)
             self.state = .listening
         }
