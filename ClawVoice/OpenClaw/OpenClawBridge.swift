@@ -10,6 +10,8 @@ final class OpenClawBridge {
 
     // Persistent conversation history — reset when Gemini session starts
     private var messages: [[String: String]] = []
+    // Stable session ID — same value = same OpenClaw session (derived via `user` field)
+    private var sessionId: String = UUID().uuidString
 
     private var urlSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -23,6 +25,7 @@ final class OpenClawBridge {
     /// Call when starting a new Gemini session — clears conversation history
     func resetSession() {
         messages = []
+        sessionId = UUID().uuidString  // new session only when app starts a fresh Gemini session
     }
 
     // MARK: - Execute task
@@ -49,7 +52,8 @@ final class OpenClawBridge {
 
         let body: [String: Any] = [
             "model":    "gpt-4o",   // ignored by OpenClaw, required by spec
-            "messages": messages    // full history for persistent context
+            "messages": messages,   // full history for persistent context
+            "user":     sessionId   // stable key → OpenClaw reuses same agent session
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
