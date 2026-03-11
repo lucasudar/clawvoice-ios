@@ -9,9 +9,9 @@
 </p>
 
 <p align="center">
-  <img src="assets/screenshot-main.png" width="200" alt="Main screen"/>
+  <img src="assets/screenshot-speaking.jpg" width="200" alt="Speaking"/>
   &nbsp;&nbsp;&nbsp;
-  <img src="assets/screenshot-settings-v2.png" width="200" alt="Settings screen"/>
+  <img src="assets/screenshot-settings-v2.png" width="200" alt="Settings"/>
 </p>
 
 ---
