@@ -95,9 +95,11 @@ final class GeminiLiveService: NSObject {
         stopPingTimer()
         // Send WS ping every 25s — Gemini closes idle connections after ~60s of silence
         pingTimer = Timer.scheduledTimer(withTimeInterval: 25, repeats: true) { [weak self] _ in
-            self?.webSocketTask?.sendPing { error in
-                if let error {
-                    print("⚠️ [ClawVoice] WS ping failed: \(error)")
+            guard let self else { return }
+            // Dispatch to MainActor to access main-actor-isolated webSocketTask
+            Task { @MainActor [weak self] in
+                self?.webSocketTask?.sendPing { error in
+                    if let error { print("⚠️ [ClawVoice] WS ping failed: \(error)") }
                 }
             }
         }
