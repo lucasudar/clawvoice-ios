@@ -8,9 +8,8 @@ final class OpenClawBridge {
     static let shared = OpenClawBridge()
     private init() {}
 
-    // Persistent conversation history — reset when Gemini session starts
-    private var messages: [[String: String]] = []
     // Stable session ID — same value = same OpenClaw session (derived via `user` field)
+    // OpenClaw maintains conversation history server-side, so we only send current message
     private var sessionId: String = UUID().uuidString
 
     private var urlSession: URLSession = {
@@ -24,8 +23,7 @@ final class OpenClawBridge {
 
     /// Call when starting a new Gemini session — clears conversation history
     func resetSession() {
-        messages = []
-        sessionId = UUID().uuidString  // new session only when app starts a fresh Gemini session
+        sessionId = UUID().uuidString  // new UUID = new OpenClaw session
     }
 
     // MARK: - Execute task
@@ -42,18 +40,16 @@ final class OpenClawBridge {
             throw OpenClawError.invalidURL(urlString)
         }
 
-        // Append user message to history
-        messages.append(["role": "user", "content": task])
-
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json",                  forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(settings.openClawToken)",  forHTTPHeaderField: "Authorization")
 
+        // Only send current message — OpenClaw maintains session context server-side via `user` UUID
         let body: [String: Any] = [
-            "model":    "gpt-4o",   // ignored by OpenClaw, required by spec
-            "messages": messages,   // full history for persistent context
-            "user":     sessionId   // stable key → OpenClaw reuses same agent session
+            "model":    "gpt-4o",
+            "messages": [["role": "user", "content": task]],
+            "user":     sessionId
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
@@ -61,8 +57,6 @@ final class OpenClawBridge {
 
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             let body = String(data: data, encoding: .utf8) ?? ""
-            // Remove the user message we added since the call failed
-            messages.removeLast()
             throw OpenClawError.httpError(http.statusCode, body)
         }
 
@@ -75,12 +69,7 @@ final class OpenClawBridge {
         }
 
         let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
-        let content = decoded.choices.first?.message.content ?? "(no response)"
-
-        // Append assistant response to history
-        messages.append(["role": "assistant", "content": content])
-
-        return content
+        return decoded.choices.first?.message.content ?? "(no response)"
     }
 
     // MARK: - Health check
