@@ -8,6 +8,8 @@ A minimal iOS voice assistant for [OpenClaw](https://github.com/openclaw/opencla
 
 No video. No camera. No continuous streaming. Just voice.
 
+**Works with screen off** — audio session stays active when the display sleeps, so you can lock your phone and keep talking hands-free.
+
 <p align="center">
   <img src="assets/screenshot-main.png" width="220" alt="Main screen"/>
   &nbsp;&nbsp;&nbsp;
