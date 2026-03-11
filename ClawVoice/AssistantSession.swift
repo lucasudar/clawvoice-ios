@@ -198,6 +198,7 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAudio(_ data: Data) {
         Task { @MainActor in
+            guard self.state != .paused else { return }  // drop audio while paused — avoids main thread pileup
             if self.state != .speaking {
                 self.state = .speaking
             }

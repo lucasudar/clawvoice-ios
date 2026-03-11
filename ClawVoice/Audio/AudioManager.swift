@@ -208,7 +208,7 @@ final class AudioManager {
 
     /// Schedule a chunk of PCM Int16 24kHz audio for gapless playback.
     func playAudio(_ data: Data) {
-        guard isCapturing, !data.isEmpty else { return }
+        guard isCapturing, !data.isEmpty, !isUserPaused else { return }
 
         let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                           sampleRate: outputSampleRate,
