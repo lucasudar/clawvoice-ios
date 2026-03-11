@@ -38,7 +38,7 @@ ClawVoice uses **Gemini Live API** — a real-time bidirectional audio stream. Y
 - 🎧 **Any headphones** — AirPods, wired, Bluetooth; speaker mode as fallback  
 - ⚡ **Gemini 2.5 Flash** — the fastest native audio model available (`gemini-2.5-flash-native-audio-preview-12-2025`)
 - 🤖 **OpenClaw backend** — your AI model executes actions: web search, messages, reminders, smart home, anything your server can do (supports any provider OpenClaw supports)
-- 🍎 **Hey Siri activation** — say *"Hey Siri, Mr. Krabs"* to launch and start listening immediately
+- 🍎 **Hey Siri activation** — say *"Hey Siri, [your phrase]"* to launch and start listening immediately
 - 🔋 **Battery friendly** — minimal UI, no video, no camera, no polling
 - 🔐 **Private** — your keys, your server, no third-party cloud routing
 
@@ -135,7 +135,7 @@ A free Apple ID is enough to run on your own device — no paid developer accoun
 iOS doesn't allow fully custom always-on wake words, but Siri Shortcuts let you pick **any phrase** as a trigger:
 
 1. **Shortcuts app** → **+** → Add Action → search *ClawVoice* → **Activate Assistant**
-2. Tap the shortcut name → **Add to Siri** → record any phrase you like (e.g. *"Hey assistant"*, *"Yo Krabs"*, your assistant's name, anything)
+2. Tap the shortcut name → **Add to Siri** → record any phrase you like (e.g. your assistant's name, a nickname, anything you want)
 3. Say **"Hey Siri, [your phrase]"** — app launches and immediately starts active listening
 
 No button tap needed. Works with screen off and any headphones paired with your phone.
