@@ -81,12 +81,12 @@ final class AssistantSession: ObservableObject {
     }
 
     func pause() {
-        audio.setMuted(true)
+        audio.pauseCapture()  // stops engine + clears mic indicator
         state = .paused
     }
 
     func resume() {
-        audio.setMuted(false)
+        audio.resumeCapture()  // restarts engine + mic
         state = .listening
     }
 
