@@ -5,6 +5,7 @@ protocol GeminiLiveServiceDelegate: AnyObject {
     func geminiDidReceiveAudio(_ data: Data)
     func geminiDidReceiveText(_ text: String)
     func geminiDidReceiveToolCall(id: String, name: String, args: [String: String])
+    func geminiDidTurnComplete(interrupted: Bool)  // model finished speaking (or was interrupted)
     func geminiDidDisconnect(error: Error?)
 }
 
@@ -216,7 +217,23 @@ final class GeminiLiveService: NSObject {
             return
         }
 
+        // GoAway — server about to close, trigger reconnect
+        if let goAway = json["goAway"] as? [String: Any] {
+            let secs = (goAway["timeLeft"] as? [String: Any])?["seconds"] as? Int ?? 0
+            print("⚠️ [Gemini] GoAway: server closing in \(secs)s")
+            await MainActor.run { self.delegate?.geminiDidDisconnect(error: nil) }
+            return
+        }
+
         if let serverContent = json["serverContent"] as? [String: Any] {
+
+            // User interrupted model speech
+            if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
+                print("✋ [Gemini] Interrupted")
+                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                return
+            }
+
             if let modelTurn = serverContent["modelTurn"] as? [String: Any],
                let parts = modelTurn["parts"] as? [[String: Any]] {
                 for part in parts {
@@ -232,6 +249,7 @@ final class GeminiLiveService: NSObject {
                     }
                 }
             }
+
             // Transcription
             if let t = serverContent["inputTranscription"] as? [String: Any],
                let txt = t["text"] as? String, !txt.isEmpty {
@@ -241,6 +259,12 @@ final class GeminiLiveService: NSObject {
             if let t = serverContent["outputTranscription"] as? [String: Any],
                let txt = t["text"] as? String, !txt.isEmpty {
                 print("🤖 AI: \(txt)")
+            }
+
+            // Turn complete — model finished speaking, switch back to listening
+            if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
+                print("✅ [Gemini] Turn complete")
+                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: false) }
             }
         }
     }

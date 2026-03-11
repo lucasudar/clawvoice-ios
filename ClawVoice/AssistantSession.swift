@@ -196,6 +196,16 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         }
     }
 
+    nonisolated func geminiDidTurnComplete(interrupted: Bool) {
+        Task { @MainActor in
+            print("✅ [ClawVoice] Turn complete, interrupted=\(interrupted)")
+            self.audio.setMuted(false)   // unmute mic
+            if self.state == .speaking || self.state == .thinking {
+                self.state = .listening
+            }
+        }
+    }
+
     nonisolated func geminiDidDisconnect(error: Error?) {
         Task { @MainActor in
             self.audio.stopCapture()
