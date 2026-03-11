@@ -24,7 +24,8 @@ final class AudioManager {
     private var isMuted        = false  // mute mic while model is speaking (echo prevention)
     private(set) var isUserPaused = false  // user-initiated pause — skip sending but keep engine running
 
-
+    /// Cached on main thread via RouteChange notification — safe to read from any thread
+    private(set) var headphonesConnected = false
 
     private var chunkHandler: AudioChunkHandler?
     private let sendQueue      = DispatchQueue(label: "clawvoice.audio.send", qos: .userInitiated)
@@ -34,6 +35,25 @@ final class AudioManager {
     // MARK: - Public API
 
     /// Start capturing mic audio. Calls `onChunk` with ~100ms PCM Int16 16kHz chunks.
+    // MARK: - Route helpers (main-thread safe headphone detection)
+
+    private func updateHeadphonesState() {
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        headphonesConnected = outputs.contains {
+            $0.portType == .headphones || $0.portType == .bluetoothA2DP ||
+            $0.portType == .bluetoothHFP || $0.portType == .bluetoothLE
+        }
+    }
+
+    @objc private func handleRouteChange(_ notification: Notification) {
+        updateHeadphonesState()
+        // Update speaker override when route changes
+        let session = AVAudioSession.sharedInstance()
+        try? session.overrideOutputAudioPort(headphonesConnected ? .none : .speaker)
+    }
+
+    // MARK: - Capture
+
     func startCapture(onChunk: @escaping AudioChunkHandler) throws {
         guard !isCapturing else { return }
         chunkHandler = onChunk
@@ -46,9 +66,15 @@ final class AudioManager {
         try session.setPreferredSampleRate(inputSampleRate)
         try session.setPreferredIOBufferDuration(0.064)
         try session.setActive(true)
-        // Route to headphones if connected, speaker only as fallback
-        // Force bottom speaker when no headphones — .voiceChat defaults to earpiece
-        try session.overrideOutputAudioPort(.speaker)
+        // Cache headphones state and subscribe to route changes (main thread safe)
+        updateHeadphonesState()
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(handleRouteChange),
+            name: AVAudioSession.routeChangeNotification,
+            object: nil)
+
+        // Use speaker if no headphones connected (.voiceChat defaults to earpiece)
+        try session.overrideOutputAudioPort(headphonesConnected ? .none : .speaker)
 
         // Connect player to main mixer using Float32 @ 24kHz
         let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,

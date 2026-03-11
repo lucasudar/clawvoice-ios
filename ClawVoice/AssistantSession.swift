@@ -168,9 +168,12 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             self.state = .listening
             do {
                 try self.audio.startCapture { [weak self] chunk in
-                    // Always send audio — iOS voiceChat AEC handles echo suppression.
-                    // This enables Gemini interruption in all modes (headphones + speaker).
-                    self?.gemini.sendAudio(chunk)
+                    guard let self else { return }
+                    // Echo suppression: when using phone speaker, skip audio while model speaks.
+                    // With headphones: always send (AEC handles it, enables interruption).
+                    // headphonesConnected is cached on main thread — safe to read here.
+                    if self.gemini.isModelSpeaking && !self.audio.headphonesConnected { return }
+                    self.gemini.sendAudio(chunk)
                 }
             } catch {
                 self.state = .error("Microphone error: \(error.localizedDescription)")
