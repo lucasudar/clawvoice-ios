@@ -47,7 +47,8 @@ final class AudioManager {
         try session.setPreferredIOBufferDuration(0.064)
         try session.setActive(true)
         // Route to headphones if connected, speaker only as fallback
-        try session.overrideOutputAudioPort(.none)
+        // Force bottom speaker when no headphones — .voiceChat defaults to earpiece
+        try session.overrideOutputAudioPort(.speaker)
 
         // Connect player to main mixer using Float32 @ 24kHz
         let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,

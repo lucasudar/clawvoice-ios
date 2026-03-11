@@ -42,11 +42,13 @@ final class AssistantSession: ObservableObject {
     @Published var state: State = .idle {
         didSet { UIApplication.shared.isIdleTimerDisabled = state.isActive }
     }
-    @Published var userTranscript: String = ""   // what user said (rolling, cleared on turn start)
-    @Published var aiTranscript: String = ""     // what AI said
+    @Published var userTranscript: String = ""   // what user said (cleared on each new user turn)
+    @Published var aiTranscript: String = ""     // what AI said (cleared on each new AI turn)
     private var userBuffer: String = ""
     private var aiBuffer: String = ""
     private var transcriptFlushTask: Task<Void, Never>?
+    private var awaitingNewAITurn = false         // clear aiTranscript on next AI chunk after turnComplete
+    private var userTurnActive = false            // true while user is speaking this turn
     @Published var lastError: String? = nil
     @Published var currentTask: String? = nil  // shown while executing tool calls
 
@@ -106,6 +108,8 @@ final class AssistantSession: ObservableObject {
         userBuffer = ""
         aiBuffer = ""
         transcriptFlushTask?.cancel()
+        awaitingNewAITurn = false
+        userTurnActive = false
         lastError = nil
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
@@ -187,13 +191,26 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveUserText(_ text: String) {
         Task { @MainActor in
-            self.aiTranscript = ""  // clear AI text when user starts speaking
+            if !self.userTurnActive {
+                // New user turn: clear previous user text and start fresh
+                self.userTranscript = ""
+                self.userBuffer = ""
+                self.userTurnActive = true
+                self.awaitingNewAITurn = true  // next AI response should clear AI transcript
+            }
             self.appendBuffered(text, to: \.userBuffer, publish: \.userTranscript)
         }
     }
 
     nonisolated func geminiDidReceiveAIText(_ text: String) {
         Task { @MainActor in
+            if self.awaitingNewAITurn {
+                // New AI turn: clear previous AI text
+                self.aiTranscript = ""
+                self.aiBuffer = ""
+                self.awaitingNewAITurn = false
+                self.userTurnActive = false
+            }
             self.appendBuffered(text, to: \.aiBuffer, publish: \.aiTranscript)
         }
     }
@@ -205,7 +222,8 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         self[keyPath: buffer] += text
         let hasWordBoundary = self[keyPath: buffer].last.map { $0.isWhitespace || $0.isPunctuation } ?? false
         if hasWordBoundary {
-            self[keyPath: target] += self[keyPath: buffer]
+            let needsSpace = !(self[keyPath: target].isEmpty || self[keyPath: target].last?.isWhitespace == true)
+            self[keyPath: target] += (needsSpace ? " " : "") + self[keyPath: buffer]
             self[keyPath: buffer] = ""
             transcriptFlushTask?.cancel()
         } else {
@@ -215,7 +233,8 @@ extension AssistantSession: GeminiLiveServiceDelegate {
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
                     if !self[keyPath: buffer].isEmpty {
-                        self[keyPath: target] += self[keyPath: buffer]
+                        let ns = !(self[keyPath: target].isEmpty || self[keyPath: target].last?.isWhitespace == true)
+                        self[keyPath: target] += (ns ? " " : "") + self[keyPath: buffer]
                         self[keyPath: buffer] = ""
                     }
                 }
@@ -240,6 +259,7 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             if self.state == .speaking || self.state == .thinking {
                 self.state = .listening
             }
+            self.userTurnActive = false  // ready for next user input
         }
     }
 
