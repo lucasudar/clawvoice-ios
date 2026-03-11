@@ -130,13 +130,13 @@ A free Apple ID is enough to run on your own device — no paid developer accoun
 
 ## Siri Shortcut
 
-iOS doesn't allow custom always-on wake words, but Siri Shortcuts get you there:
+iOS doesn't allow fully custom always-on wake words, but Siri Shortcuts let you pick **any phrase** as a trigger:
 
 1. **Shortcuts app** → **+** → Add Action → search *ClawVoice* → **Activate Assistant**
-2. Tap the shortcut name → **Add to Siri** → record your phrase (e.g. *"Mr. Krabs"*)
-3. Say **"Hey Siri, Mr. Krabs"** — app launches and starts listening immediately
+2. Tap the shortcut name → **Add to Siri** → record any phrase you like (e.g. *"Hey assistant"*, *"Yo Krabs"*, your assistant's name, anything)
+3. Say **"Hey Siri, [your phrase]"** — app launches and immediately starts active listening
 
-Works with screen off, AirPods, Apple Watch.
+No button tap needed. Works with screen off, AirPods, Apple Watch, CarPlay.
 
 ---
 
