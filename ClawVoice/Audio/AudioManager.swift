@@ -39,7 +39,7 @@ final class AudioManager {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord,
                                 mode: .voiceChat,
-                                options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+                                options: [.allowBluetoothHFP, .allowBluetoothA2DP, .mixWithOthers])
         try session.setPreferredSampleRate(inputSampleRate)
         try session.setPreferredIOBufferDuration(0.064)
         try session.setActive(true)
@@ -142,7 +142,7 @@ final class AudioManager {
             let session = AVAudioSession.sharedInstance()
             try? session.setCategory(.playAndRecord,
                                      mode: .voiceChat,
-                                     options: [.allowBluetooth, .allowBluetoothA2DP, .mixWithOthers])
+                                     options: [.allowBluetoothHFP, .allowBluetoothA2DP, .mixWithOthers])
             try? session.setActive(true)
             try? session.overrideOutputAudioPort(.none)
             reinstallTap()
