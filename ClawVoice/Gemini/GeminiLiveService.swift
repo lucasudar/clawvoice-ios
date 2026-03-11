@@ -29,7 +29,23 @@ final class GeminiLiveService: NSObject {
 
     // MARK: - Connect / Disconnect
 
+    /// Publicly readable connection state — use to check if WebSocket is alive before resuming.
+    var isConnected: Bool { isReady && webSocketTask != nil }
+
     func connect() {
+        // Cancel any stale connection before starting a new one.
+        // Without this, old receiveTask keeps reading a dead socket, throws an error,
+        // and triggers a second geminiDidDisconnect → double scheduleReconnect cascade.
+        isReady = false
+        stopPingTimer()
+        receiveTask?.cancel()
+        receiveTask = nil
+        wsDelegate.onOpen  = nil   // nil handlers first so cancel doesn't re-fire delegates
+        wsDelegate.onClose = nil
+        wsDelegate.onError = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+
         let apiKey = AppSettings.shared.geminiApiKey
         print("🔌 [Gemini] Connecting, model=\(AppSettings.shared.geminiModel), keyLen=\(apiKey.count)")
 

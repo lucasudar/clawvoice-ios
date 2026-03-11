@@ -56,6 +56,7 @@ final class AudioManager {
 
     func startCapture(onChunk: @escaping AudioChunkHandler) throws {
         guard !isCapturing else { return }
+        isUserPaused = false  // always start fresh — stale pause flag causes silent audio drop after reconnect
         chunkHandler = onChunk
         accumulated  = Data()
 

@@ -92,8 +92,18 @@ final class AssistantSession: ObservableObject {
     }
 
     func resume() {
-        audio.resumeCapture()  // restarts engine + mic
-        state = .listening
+        if gemini.isConnected {
+            audio.resumeCapture()  // restarts engine + mic
+            state = .listening
+        } else {
+            // WebSocket died while paused — start a fresh connection instead of silently resuming into void
+            print("⚠️ [ClawVoice] Resume: Gemini not connected, starting fresh reconnect")
+            audio.stopCapture()
+            reconnectAttempts = 0
+            reconnectTask?.cancel()
+            state = .connecting
+            gemini.connect()
+        }
     }
 
     func start() {
@@ -128,6 +138,9 @@ final class AssistantSession: ObservableObject {
     private func scheduleReconnect() {
         guard reconnectAttempts < maxReconnectAttempts else {
             print("❌ [ClawVoice] Max reconnect attempts reached, giving up")
+            let msg = "Connection to Gemini lost. Tap to reconnect."
+            lastError = msg
+            state = .error(msg)
             return
         }
         reconnectAttempts += 1

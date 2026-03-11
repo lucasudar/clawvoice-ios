@@ -47,7 +47,10 @@ struct ContentView: View {
                                 : .easeOut(duration: 0.3),
                             value: session.state == .speaking
                         )
-                        .onTapGesture { session.toggle() }
+                        .onTapGesture {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            session.toggle()
+                        }
                 }
                 .onAppear { rippleScale = 1.6 }
 
