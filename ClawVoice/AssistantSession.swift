@@ -155,7 +155,11 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             self.state = .listening
             do {
                 try self.audio.startCapture { [weak self] chunk in
-                    self?.gemini.sendAudio(chunk)
+                    guard let self else { return }
+                    // VisionClaw pattern: skip sending while model speaks (echo suppression)
+                    // Engine stays running so playback works — no engine stop/restart
+                    if self.gemini.isModelSpeaking { return }
+                    self.gemini.sendAudio(chunk)
                 }
             } catch {
                 self.state = .error("Microphone error: \(error.localizedDescription)")
@@ -167,7 +171,6 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         Task { @MainActor in
             if self.state != .speaking {
                 self.state = .speaking
-                self.audio.setMuted(true)  // mute mic while model speaks (echo prevention)
             }
             self.audio.playAudio(data)
         }
@@ -177,7 +180,6 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         Task { @MainActor in
             // Any text (transcription) means user is speaking → unmute
             if text.hasPrefix("You: ") {
-                self.audio.setMuted(false)
                 self.state = .listening
             }
             self.transcript += text
@@ -186,7 +188,6 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveToolCall(id: String, name: String, args: [String: String]) {
         Task { @MainActor in
-            self.audio.setMuted(false)
             self.state = .thinking
             self.currentTask = args["task"] ?? name
             let result = await self.router.handle(id: id, name: name, args: args)
@@ -199,7 +200,6 @@ extension AssistantSession: GeminiLiveServiceDelegate {
     nonisolated func geminiDidTurnComplete(interrupted: Bool) {
         Task { @MainActor in
             print("✅ [ClawVoice] Turn complete, interrupted=\(interrupted)")
-            self.audio.setMuted(false)   // unmute mic
             if self.state == .speaking || self.state == .thinking {
                 self.state = .listening
             }

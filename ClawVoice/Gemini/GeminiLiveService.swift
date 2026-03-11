@@ -16,6 +16,7 @@ final class GeminiLiveService: NSObject {
     // MARK: - Properties
 
     weak var delegate: GeminiLiveServiceDelegate?
+    private(set) var isModelSpeaking = false  // true while Gemini is streaming audio
     private var webSocketTask: URLSessionWebSocketTask?
     private var urlSession: URLSession?
     private var receiveTask: Task<Void, Never>?
@@ -119,18 +120,19 @@ final class GeminiLiveService: NSObject {
                 "systemInstruction": [
                     "parts": [["text": settings.systemPrompt]]
                 ],
-                // VAD: tells Gemini when user stops speaking → triggers response
                 "realtimeInputConfig": [
                     "automaticActivityDetection": [
                         "disabled": false,
                         "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-                        "endOfSpeechSensitivity": "END_SENSITIVITY_LOW",
-                        "silenceDurationMs": 800,
+                        "endOfSpeechSensitivity": "END_SENSITIVITY_HIGH",
+                        "silenceDurationMs": 500,
                         "prefixPaddingMs": 40
                     ],
                     "activityHandling": "START_OF_ACTIVITY_INTERRUPTS",
                     "turnCoverage": "TURN_INCLUDES_ALL_INPUT"
                 ],
+                "inputAudioTranscription": [:] as [String: Any],
+                "outputAudioTranscription": [:] as [String: Any],
                 "tools": [
                     ["functionDeclarations": [
                         [
@@ -230,7 +232,7 @@ final class GeminiLiveService: NSObject {
             // User interrupted model speech
             if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
                 print("✋ [Gemini] Interrupted")
-                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                await MainActor.run { self.isModelSpeaking = false; self.delegate?.geminiDidTurnComplete(interrupted: true) }
                 return
             }
 
@@ -242,7 +244,7 @@ final class GeminiLiveService: NSObject {
                        mimeType.hasPrefix("audio/pcm"),
                        let b64 = inlineData["data"] as? String,
                        let audioData = Data(base64Encoded: b64) {
-                        await MainActor.run { self.delegate?.geminiDidReceiveAudio(audioData) }
+                        await MainActor.run { self.isModelSpeaking = true; self.delegate?.geminiDidReceiveAudio(audioData) }
                     }
                     if let text = part["text"] as? String, !text.isEmpty {
                         await MainActor.run { self.delegate?.geminiDidReceiveText(text) }
@@ -264,7 +266,7 @@ final class GeminiLiveService: NSObject {
             // Turn complete — model finished speaking, switch back to listening
             if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
                 print("✅ [Gemini] Turn complete")
-                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: false) }
+                await MainActor.run { self.isModelSpeaking = false; self.delegate?.geminiDidTurnComplete(interrupted: false) }
             }
         }
     }
