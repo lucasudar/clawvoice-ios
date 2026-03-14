@@ -21,6 +21,9 @@
 		72C07683209C4462BBE71068 /* AssistantIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B2D6834523F4C9B9B2220C0 /* AssistantIntent.swift */; };
 		46962468C95B4EABBC8CCEFB /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = D81D0AAA570A48B4A7E6EF3E /* Assets.xcassets */; };
 		680B3FE0FC8848FEA91CE0EE /* Secrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67A553BA5E874EDCA1ED7D92 /* Secrets.swift */; };
+		AA11223344556677889900AB /* SessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11223344556677889900CD /* SessionStore.swift */; };
+		BB11223344556677889900AB /* SessionsDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB11223344556677889900CD /* SessionsDrawer.swift */; };
+		CC11223344556677889900AB /* DebugLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC11223344556677889900CD /* DebugLog.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -40,6 +43,9 @@
 		F41A31D186A84CC3883C70C5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		18E0CFAED7B342CBB61CFEC1 /* ClawVoice.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClawVoice.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		67A553BA5E874EDCA1ED7D92 /* Secrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Secrets.swift; sourceTree = "<group>"; };
+		AA11223344556677889900CD /* SessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStore.swift; sourceTree = "<group>"; };
+		BB11223344556677889900CD /* SessionsDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsDrawer.swift; sourceTree = "<group>"; };
+		CC11223344556677889900CD /* DebugLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugLog.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -66,6 +72,8 @@
 				9706E5C861114E1BA06339ED /* Gemini */,
 				2AF3B40BE17346A1BDFA09FB /* OpenClaw */,
 				076D8642E8804E75B06CA1F6 /* Intents */,
+				DD11223344556677889900AB /* Sessions */,
+				EE11223344556677889900AB /* Debug */,
 				D81D0AAA570A48B4A7E6EF3E /* Assets.xcassets */,
 				F41A31D186A84CC3883C70C5 /* Info.plist */,
 				8260EC3D90B4408691A1CF43 /* Products */,
@@ -114,6 +122,23 @@
 				6B2D6834523F4C9B9B2220C0 /* AssistantIntent.swift */,
 			);
 			path = Intents;
+			sourceTree = "<group>";
+		};
+		DD11223344556677889900AB /* Sessions */ = {
+			isa = PBXGroup;
+			children = (
+				AA11223344556677889900CD /* SessionStore.swift */,
+				BB11223344556677889900CD /* SessionsDrawer.swift */,
+			);
+			path = Sessions;
+			sourceTree = "<group>";
+		};
+		EE11223344556677889900AB /* Debug */ = {
+			isa = PBXGroup;
+			children = (
+				CC11223344556677889900CD /* DebugLog.swift */,
+			);
+			path = Debug;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -198,6 +223,9 @@
 				3BA6AD1A508347F49D1E8E68 /* ToolCallRouter.swift in Sources */,
 				72C07683209C4462BBE71068 /* AssistantIntent.swift in Sources */,
 				680B3FE0FC8848FEA91CE0EE /* Secrets.swift in Sources */,
+				AA11223344556677889900AB /* SessionStore.swift in Sources */,
+				BB11223344556677889900AB /* SessionsDrawer.swift in Sources */,
+				CC11223344556677889900AB /* DebugLog.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
