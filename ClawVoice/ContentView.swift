@@ -6,7 +6,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var rippleScale: CGFloat = 1.0
     @State private var now: Date = Date()
-    private let clockTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+    private let clockTimer = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
