@@ -51,6 +51,7 @@ final class AssistantSession: ObservableObject {
     private var userTurnActive = false            // true while user is speaking this turn
     @Published var lastError: String? = nil
     @Published var currentTask: String? = nil  // shown while executing tool calls
+    @Published var sessionStartTime: Date? = nil  // set on start(), cleared on stop()
 
     // MARK: - Private
 
@@ -122,6 +123,7 @@ final class AssistantSession: ObservableObject {
         awaitingNewAITurn = false
         userTurnActive = false
         lastError = nil
+        sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
         OpenClawBridge.shared.resetSession()  // fresh context for new session
@@ -133,6 +135,7 @@ final class AssistantSession: ObservableObject {
         reconnectAttempts = 0
         gemini.disconnect()
         audio.stopCapture()
+        sessionStartTime = nil
         state = .idle
     }
 

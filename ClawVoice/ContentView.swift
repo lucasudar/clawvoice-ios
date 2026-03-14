@@ -5,6 +5,8 @@ struct ContentView: View {
     @EnvironmentObject var settings: AppSettings
     @State private var showSettings = false
     @State private var rippleScale: CGFloat = 1.0
+    @State private var now: Date = Date()
+    private let clockTimer = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
 
     var body: some View {
         ZStack {
@@ -61,6 +63,14 @@ struct ContentView: View {
                         .foregroundColor(.white.opacity(0.8))
                         .multilineTextAlignment(.center)
                         .animation(.easeInOut(duration: 0.2), value: session.state.label)
+
+                    // Session duration — shown when active
+                    if let start = session.sessionStartTime {
+                        Text(sessionDurationLabel(since: start))
+                            .font(.system(size: 12, design: .rounded))
+                            .foregroundColor(.white.opacity(0.3))
+                            .transition(.opacity)
+                    }
 
                     // Dynamic task label (while executing OpenClaw)
                     if let task = session.currentTask {
@@ -146,6 +156,26 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .clawVoiceActivate)) { _ in
             session.start()
+        }
+        .onReceive(clockTimer) { date in
+            now = date
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func sessionDurationLabel(since start: Date) -> String {
+        let elapsed = Int(now.timeIntervalSince(start))
+        let minutes = elapsed / 60
+        if minutes < 1 {
+            return "< 1 min"
+        } else if minutes < 60 {
+            return "\(minutes) min"
+        } else {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "h:mm a"
+            formatter.timeZone = TimeZone(identifier: "America/Vancouver")
+            return "since \(formatter.string(from: start))"
         }
     }
 
