@@ -31,6 +31,7 @@ final class AudioManager {
     private let sendQueue      = DispatchQueue(label: "clawvoice.audio.send", qos: .userInitiated)
     private var accumulated    = Data()
     private var flushTimer:    DispatchSourceTimer?  // periodic flush so silence reaches Gemini VAD
+    private let tapQueue       = DispatchQueue(label: "clawvoice.audio.tap", qos: .userInitiated)
 
     // MARK: - Public API
 
@@ -47,9 +48,64 @@ final class AudioManager {
 
     @objc private func handleRouteChange(_ notification: Notification) {
         updateHeadphonesState()
-        // Update speaker override when route changes
         let session = AVAudioSession.sharedInstance()
         try? session.overrideOutputAudioPort(headphonesConnected ? .none : .speaker)
+    }
+
+    /// Called by AVAudioEngine when BT or other route changes force engine reconfiguration.
+    /// We must reinstall the tap with the new hardware format and restart the engine.
+    @objc private func handleEngineConfigurationChange(_ notification: Notification) {
+        guard isCapturing else { return }
+        print("⚠️ [Audio] Engine reconfigured — reinstalling tap")
+        tapQueue.async { [weak self] in
+            guard let self else { return }
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.installTap()
+            if !self.audioEngine.isRunning {
+                do {
+                    self.audioEngine.prepare()
+                    try self.audioEngine.start()
+                    if !self.playerNode.isPlaying { self.playerNode.play() }
+                } catch {
+                    print("❌ [Audio] Engine restart after reconfigure failed: \(error)")
+                }
+            }
+        }
+    }
+
+    private func installTap() {
+        let inputNode       = audioEngine.inputNode
+        let nativeFormat    = inputNode.outputFormat(forBus: 0)
+        // Guard against invalid format (can happen briefly during BT route change)
+        guard nativeFormat.sampleRate > 0 else {
+            print("⚠️ [Audio] Invalid input format (sampleRate=0), skipping tap install")
+            return
+        }
+        let resampleFormat  = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: inputSampleRate,
+                                             channels: channels,
+                                             interleaved: false)!
+        let needsResample   = nativeFormat.sampleRate != inputSampleRate || nativeFormat.channelCount != channels
+        let converter       = needsResample ? AVAudioConverter(from: nativeFormat, to: resampleFormat) : nil
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
+            guard let self, !self.isMuted, !self.isUserPaused else { return }
+            let pcmData: Data
+            if let converter {
+                guard let resampled = self.convert(buffer, using: converter, to: resampleFormat) else { return }
+                pcmData = self.float32ToInt16Data(resampled)
+            } else {
+                pcmData = self.float32ToInt16Data(buffer)
+            }
+            self.sendQueue.async {
+                self.accumulated.append(pcmData)
+                if self.accumulated.count >= self.minSendBytes {
+                    let chunk = self.accumulated
+                    self.accumulated = Data()
+                    self.chunkHandler?(chunk)
+                }
+            }
+        }
     }
 
     // MARK: - Capture
@@ -69,12 +125,16 @@ final class AudioManager {
         try session.setPreferredSampleRate(inputSampleRate)
         try session.setPreferredIOBufferDuration(0.064)
         try session.setActive(true)
-        // Cache headphones state and subscribe to route changes (main thread safe)
+        // Cache headphones state and subscribe to route + engine changes
         updateHeadphonesState()
         NotificationCenter.default.addObserver(self,
             selector: #selector(handleRouteChange),
             name: AVAudioSession.routeChangeNotification,
             object: nil)
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(handleEngineConfigurationChange),
+            name: .AVAudioEngineConfigurationChange,
+            object: audioEngine)
 
         // Use speaker if no headphones connected (.voiceChat defaults to earpiece)
         try session.overrideOutputAudioPort(headphonesConnected ? .none : .speaker)
@@ -90,38 +150,10 @@ final class AudioManager {
         }
         audioEngine.connect(playerNode, to: audioEngine.mainMixerNode, format: playerFormat)
 
-        // Tap in native hardware format (Float32), then convert manually
-        let inputNode       = audioEngine.inputNode
-        let nativeFormat    = inputNode.outputFormat(forBus: 0)
-        let needsResample   = nativeFormat.sampleRate != inputSampleRate || nativeFormat.channelCount != channels
+        // Install tap using shared helper (handles BT format + resampling)
+        installTap()
 
-        let resampleFormat  = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                             sampleRate: inputSampleRate,
-                                             channels: channels,
-                                             interleaved: false)!
-        let converter       = needsResample ? AVAudioConverter(from: nativeFormat, to: resampleFormat) : nil
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            guard let self, !self.isMuted, !self.isUserPaused else { return }
-
-            let pcmData: Data
-            if let converter {
-                guard let resampled = self.convert(buffer, using: converter, to: resampleFormat) else { return }
-                pcmData = self.float32ToInt16Data(resampled)
-            } else {
-                pcmData = self.float32ToInt16Data(buffer)
-            }
-
-            self.sendQueue.async {
-                self.accumulated.append(pcmData)
-                if self.accumulated.count >= self.minSendBytes {
-                    let chunk = self.accumulated
-                    self.accumulated = Data()
-                    self.chunkHandler?(chunk)
-                }
-            }
-        }
-
+        audioEngine.prepare()
         try audioEngine.start()
         playerNode.play()
         isCapturing = true
@@ -131,6 +163,8 @@ final class AudioManager {
     func stopCapture() {
         guard isCapturing else { return }
         stopFlushTimer()
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: .AVAudioEngineConfigurationChange, object: audioEngine)
         audioEngine.inputNode.removeTap(onBus: 0)
         playerNode.stop()
         audioEngine.stop()
@@ -181,35 +215,7 @@ final class AudioManager {
         if !playerNode.isPlaying { playerNode.play() }  // re-arm player for incoming AI audio
     }
 
-    private func reinstallTap() {
-        let inputNode    = audioEngine.inputNode
-        let nativeFormat = inputNode.outputFormat(forBus: 0)
-        let resampleFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                           sampleRate: inputSampleRate,
-                                           channels: channels,
-                                           interleaved: false)!
-        let needsResample = nativeFormat.sampleRate != inputSampleRate || nativeFormat.channelCount != channels
-        let converter = needsResample ? AVAudioConverter(from: nativeFormat, to: resampleFormat) : nil
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: nativeFormat) { [weak self] buffer, _ in
-            guard let self, !self.isMuted, !self.isUserPaused else { return }
-            let pcmData: Data
-            if let converter {
-                guard let resampled = self.convert(buffer, using: converter, to: resampleFormat) else { return }
-                pcmData = self.float32ToInt16Data(resampled)
-            } else {
-                pcmData = self.float32ToInt16Data(buffer)
-            }
-            self.sendQueue.async {
-                self.accumulated.append(pcmData)
-                if self.accumulated.count >= self.minSendBytes {
-                    let chunk = self.accumulated
-                    self.accumulated = Data()
-                    self.chunkHandler?(chunk)
-                }
-            }
-        }
-    }
 
     /// Schedule a chunk of PCM Int16 24kHz audio for gapless playback.
     func playAudio(_ data: Data) {
