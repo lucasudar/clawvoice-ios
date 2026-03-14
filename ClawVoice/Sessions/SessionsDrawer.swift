@@ -6,6 +6,7 @@ struct SessionsDrawer: View {
     @Binding var isOpen: Bool
 
     var body: some View {
+        GeometryReader { geo in
         ZStack(alignment: .leading) {
             // Dim background
             if isOpen {
@@ -88,16 +89,17 @@ struct SessionsDrawer: View {
 
                         Spacer()
                     }
-                    .frame(width: min(UIScreen.main.bounds.width * 0.78, 300))
+                    .frame(width: min(geo.size.width * 0.78, 300))
                     .background(Color(white: 0.08))
+                    .ignoresSafeArea(edges: .vertical)
                     .transition(.move(edge: .leading))
 
                     Spacer()
                 }
-                .ignoresSafeArea()
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: isOpen)
+        } // GeometryReader
     }
 
     // MARK: - Helpers
