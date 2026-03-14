@@ -4,6 +4,7 @@ struct SessionsDrawer: View {
     @EnvironmentObject var session: AssistantSession
     @ObservedObject var store: SessionStore = .shared
     @Binding var isOpen: Bool
+    @State private var showClearConfirm = false
 
     var body: some View {
         GeometryReader { geo in
@@ -88,6 +89,33 @@ struct SessionsDrawer: View {
                         }
 
                         Spacer()
+
+                        // Clear all conversations button
+                        if !store.sessions.isEmpty {
+                            Divider().background(Color.white.opacity(0.1))
+                            Button {
+                                showClearConfirm = true
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 15))
+                                    Text("Clear All Conversations")
+                                        .font(.system(size: 15, weight: .medium, design: .rounded))
+                                }
+                                .foregroundColor(.red.opacity(0.85))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 14)
+                            }
+                            .confirmationDialog("Delete all conversations?", isPresented: $showClearConfirm, titleVisibility: .visible) {
+                                Button("Delete All", role: .destructive) {
+                                    store.clearAll()
+                                }
+                                Button("Cancel", role: .cancel) {}
+                            } message: {
+                                Text("This will permanently delete all session history from this device.")
+                            }
+                            .padding(.bottom, 8)
+                        }
                     }
                     .frame(width: min(geo.size.width * 0.78, 300))
                     .background(Color(white: 0.08))

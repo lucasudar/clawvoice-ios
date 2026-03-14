@@ -65,7 +65,8 @@ final class AssistantSession: ObservableObject {
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
     private var reconnectTask: Task<Void, Never>?
-    private var sessionNamed = false  // true after first turn completes and session is named
+    private var sessionNamed = false  // true after session name is set
+    private var turnCount = 0          // counts completed turns for deferred naming
 
     // MARK: - Init
 
@@ -127,6 +128,7 @@ final class AssistantSession: ObservableObject {
         userTurnActive = false
         lastError = nil
         sessionNamed = false
+        turnCount = 0
         sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
@@ -153,6 +155,7 @@ final class AssistantSession: ObservableObject {
         userTurnActive = false
         lastError = nil
         sessionNamed = true  // don't overwrite existing session name
+        turnCount = 0
         sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Resuming session \(sessionId.prefix(8))...")
@@ -325,8 +328,10 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             if self.state == .speaking || self.state == .thinking {
                 self.state = .listening
             }
-            // Name session after first complete user turn
-            if !self.sessionNamed && !self.userTranscript.isEmpty {
+            self.turnCount += 1
+            // Name session after 2+ turns OR when transcript is long enough (≥40 chars)
+            if !self.sessionNamed && !self.userTranscript.isEmpty &&
+               (self.turnCount >= 2 || self.userTranscript.count >= 40) {
                 SessionStore.shared.nameSession(
                     id: OpenClawBridge.shared.currentSessionId,
                     from: self.userTranscript

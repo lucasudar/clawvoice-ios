@@ -77,6 +77,11 @@ final class SessionStore: ObservableObject {
         save()
     }
 
+    func clearAll() {
+        sessions = []
+        try? FileManager.default.removeItem(at: storageURL)
+    }
+
     // MARK: - Persistence
 
     private func save() {
