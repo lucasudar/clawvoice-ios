@@ -226,12 +226,13 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             do {
                 try self.audio.startCapture { [weak self] chunk in
                     guard let self else { return }
-                    // Echo suppression: when using phone speaker, skip audio while model speaks.
-                    // With headphones: always send (AEC handles it, enables interruption).
-                    // headphonesConnected is cached on main thread — safe to read here.
-                    // Without headphones: suppress mic while Gemini speaks to prevent speaker→mic echo.
+                    // Echo suppression: when using phone speaker, block mic while AI speaks OR
+                    // while processing a tool call (echo from previous speech still draining).
                     // With headphones: AEC handles it — mic stays open so user can interrupt.
-                    if self.gemini.isModelSpeaking && !self.audio.headphonesConnected { return }
+                    if !self.audio.headphonesConnected {
+                        if self.gemini.isModelSpeaking { return }
+                        if self.state == .thinking { return }
+                    }
                     self.gemini.sendAudio(chunk)
                 }
             } catch {

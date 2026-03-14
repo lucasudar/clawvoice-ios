@@ -289,7 +289,10 @@ final class GeminiLiveService: NSObject {
             // User interrupted model speech
             if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
                 print("✋ [Gemini] Interrupted")
-                await MainActor.run { self.isModelSpeaking = false; self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                // Drain delay on interrupt too — echo from speaker needs time to dissipate
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                await MainActor.run { self.isModelSpeaking = false }
                 return
             }
 
@@ -326,7 +329,7 @@ final class GeminiLiveService: NSObject {
             if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
                 print("✅ [Gemini] Turn complete")
                 await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: false) }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(nanoseconds: 800_000_000)
                 await MainActor.run { self.isModelSpeaking = false }
             }
         }
