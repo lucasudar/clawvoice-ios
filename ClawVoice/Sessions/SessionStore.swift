@@ -77,6 +77,11 @@ final class SessionStore: ObservableObject {
         save()
     }
 
+    func deleteSession(id: String) {
+        sessions.removeAll { $0.id == id }
+        save()
+    }
+
     func clearAll() {
         sessions = []
         try? FileManager.default.removeItem(at: storageURL)

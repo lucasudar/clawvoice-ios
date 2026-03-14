@@ -80,9 +80,12 @@ struct SessionsDrawer: View {
                                         .padding(.bottom, 4)
 
                                     ForEach(store.sessions) { record in
-                                        SessionRow(record: record, isCurrent: record.id == currentSessionId) {
-                                            resumeSession(record)
-                                        }
+                                        SessionRow(
+                                            record: record,
+                                            isCurrent: record.id == currentSessionId,
+                                            onTap: { resumeSession(record) },
+                                            onDelete: { store.deleteSession(id: record.id) }
+                                        )
                                     }
                                 }
                             }
@@ -167,6 +170,9 @@ struct SessionRow: View {
     let record: SessionRecord
     let isCurrent: Bool
     let onTap: () -> Void
+    let onDelete: () -> Void
+
+    @State private var showDeleteConfirm = false
 
     private func sessionSubtitle(_ r: SessionRecord) -> String {
         if isCurrent { return r.displayTime + " · active" }
@@ -198,5 +204,17 @@ struct SessionRow: View {
             .background(isCurrent ? Color.white.opacity(0.06) : Color.clear)
         }
         .buttonStyle(.plain)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+            .tint(.red)
+        }
+        .confirmationDialog("Delete this conversation?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) { onDelete() }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 }
