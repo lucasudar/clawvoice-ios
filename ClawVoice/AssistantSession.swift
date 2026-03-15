@@ -185,6 +185,11 @@ final class AssistantSession: ObservableObject {
         gemini.disconnect()
         audio.stopCapture()
         sessionStartTime = nil
+        userTranscript = ""
+        aiTranscript  = ""
+        userBuffer    = ""
+        aiBuffer      = ""
+        currentTask   = nil
         state = .idle
     }
 
