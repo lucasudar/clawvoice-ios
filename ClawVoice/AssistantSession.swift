@@ -420,10 +420,9 @@ extension AssistantSession: GeminiLiveServiceDelegate {
                 self.recentUserTurns.append(self.userTranscript)
                 if self.recentUserTurns.count > 3 { self.recentUserTurns.removeFirst() }
             }
-            // Name after 2+ turns OR when last turn is substantial (≥40 chars)
+            // Name after 2+ completed turns (ensures enough context for a meaningful title)
             let latestTurn = self.recentUserTurns.last ?? ""
-            if !self.sessionNamed && !latestTurn.isEmpty &&
-               (self.turnCount >= 2 || latestTurn.count >= 40) {
+            if !self.sessionNamed && !latestTurn.isEmpty && self.turnCount >= 2 {
                 let combinedTranscript = self.recentUserTurns.joined(separator: "\n")
                 SessionStore.shared.nameSession(
                     id: OpenClawBridge.shared.currentSessionId,
