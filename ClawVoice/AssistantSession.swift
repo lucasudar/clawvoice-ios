@@ -291,6 +291,8 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAudio(_ data: Data) {
         Task { @MainActor in
+            // New audio arriving = new model turn started, unblock playback.
+            self.audio.allowPlayback()
             // Schedule audio even while paused — playerNode.pause() holds buffers for resume.
             // Don't update visual state to .speaking while paused (user sees .paused).
             if self.state != .paused && self.state != .speaking {

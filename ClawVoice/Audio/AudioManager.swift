@@ -263,18 +263,27 @@ final class AudioManager {
         playerNode.play()  // continue playing buffered AI audio
     }
 
-    /// Gemini-initiated interruption: DROP all buffered audio immediately.
-    /// Different from pauseCapture() — this is not a resume-able pause.
+    /// Gemini-initiated interruption: DROP all buffered audio + block stale chunks still in-flight.
+    /// Audio chunks for the old response may still arrive after interrupted signal (already in WebSocket queue).
+    /// Reset with allowPlayback() when new model turn starts.
+    private(set) var isPlaybackBlocked = false
+
     func clearPlayback() {
-        playerNode.stop()   // cancels all scheduled buffers
-        playerNode.play()   // re-arm for next AI response
+        isPlaybackBlocked = true  // ignore stale audio chunks still arriving after interrupt
+        playerNode.stop()          // cancel already-scheduled buffers
+        playerNode.play()          // re-arm for next AI response
+    }
+
+    /// Called when new AI model turn begins — unblock audio.
+    func allowPlayback() {
+        isPlaybackBlocked = false
     }
 
 
 
     /// Schedule a chunk of PCM Int16 24kHz audio for gapless playback.
     func playAudio(_ data: Data) {
-        guard isCapturing, !data.isEmpty else { return }
+        guard isCapturing, !data.isEmpty, !isPlaybackBlocked else { return }
         // Note: don't guard on isUserPaused — still schedule buffers while paused.
         // playerNode.pause() holds them; playerNode.play() on resume continues from here.
 
