@@ -53,23 +53,38 @@ final class AudioManager {
     }
 
     /// Called by AVAudioEngine when BT or other route changes force engine reconfiguration.
-    /// We must reinstall the tap with the new hardware format and restart the engine.
-    /// Must run on main thread — AVAudioEngine is not thread-safe.
+    /// Per Apple docs: stop engine, remove tap, reconnect nodes, reinstall tap, restart.
     @objc private func handleEngineConfigurationChange(_ notification: Notification) {
         guard isCapturing else { return }
-        print("⚠️ [Audio] Engine reconfigured — reinstalling tap")
+        print("⚠️ [Audio] Engine reconfigured — full restart")
         DispatchQueue.main.async { [weak self] in
             guard let self, self.isCapturing else { return }
+            // 1. Stop everything cleanly
+            self.playerNode.stop()
+            self.audioEngine.stop()
             self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.tapConverter = nil  // force rebuild with new format
+            self.tapConverterSourceRate = 0
+
+            // 2. Reconnect player with output format
+            self.audioEngine.disconnectNodeOutput(self.playerNode)
+            let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                             sampleRate: self.outputSampleRate,
+                                             channels: self.channels,
+                                             interleaved: false)!
+            self.audioEngine.connect(self.playerNode, to: self.audioEngine.mainMixerNode, format: playerFormat)
+
+            // 3. Reinstall tap (nil format — engine picks actual hw format after stop/restart)
             self.installTap()
-            if !self.audioEngine.isRunning {
-                do {
-                    self.audioEngine.prepare()
-                    try self.audioEngine.start()
-                    if !self.isUserPaused && !self.playerNode.isPlaying { self.playerNode.play() }
-                } catch {
-                    print("❌ [Audio] Engine restart after reconfigure failed: \(error)")
-                }
+
+            // 4. Restart engine
+            do {
+                self.audioEngine.prepare()
+                try self.audioEngine.start()
+                if !self.isUserPaused { self.playerNode.play() }
+                print("✅ [Audio] Engine restarted after BT reconfigure")
+            } catch {
+                print("❌ [Audio] Engine restart after reconfigure failed: \(error)")
             }
         }
     }
