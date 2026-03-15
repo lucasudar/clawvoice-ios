@@ -68,6 +68,7 @@ final class AssistantSession: ObservableObject {
     private var sessionNamed = false    // true after session name is set
     private var turnCount = 0           // counts completed turns for deferred naming
     private var lastUserTurn = ""       // transcript of the most recent completed user turn
+    private var postToolSuppressUntil: Date = .distantPast  // suppress mic briefly after tool result sent
 
     // MARK: - Init
 
@@ -132,6 +133,7 @@ final class AssistantSession: ObservableObject {
         sessionNamed = false
         turnCount = 0
         lastUserTurn = ""
+        postToolSuppressUntil = .distantPast
         sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
@@ -262,10 +264,13 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             do {
                 try self.audio.startCapture { [weak self] chunk in
                     guard let self else { return }
-                    // Echo suppression: block mic only while AI is actively speaking (no headphones).
-                    // During .thinking (tool execution) mic stays open so user can interrupt.
-                    // 800ms drain delay after speech ensures echo is gone by then.
-                    if self.gemini.isModelSpeaking && !self.audio.headphonesConnected { return }
+                    // Echo suppression (speaker only — headphones use AEC):
+                    // 1. While AI is speaking (isModelSpeaking)
+                    // 2. Brief window after tool result sent (echo drain before AI starts responding)
+                    if !self.audio.headphonesConnected {
+                        if self.gemini.isModelSpeaking { return }
+                        if Date() < self.postToolSuppressUntil { return }
+                    }
                     self.gemini.sendAudio(chunk)
                 }
             } catch {
@@ -347,8 +352,11 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             let result = await self.router.handle(id: id, name: name, args: args)
             self.currentTask = nil
             self.gemini.sendToolResponse(id: id, output: result)
+            // Suppress mic for 800ms after tool result — gives Gemini time to start speaking
+            // without echo from previous AI speech interrupting the new response
+            self.postToolSuppressUntil = Date().addingTimeInterval(0.8)
             AudioServicesPlayAlertSound(1054)   // "tweet" — tool done (distinct, speaker)
-            self.state = .listening
+            // Keep .thinking state — geminiDidReceiveAudio will switch to .speaking
         }
     }
 
