@@ -94,6 +94,7 @@ final class OpenClawBridge {
     /// Generate a short 2-5 word topic name from user transcript.
     /// Uses Gemini REST API directly (stateless, no session history pollution).
     func generateTopicName(from transcript: String) async -> String? {
+        print("🏷️ [TopicName] transcript (\(transcript.count) chars): \(transcript.prefix(120))")
         let settings = AppSettings.shared
         guard !settings.openClawToken.isEmpty else { return nil }
         guard let url = URL(string: "\(settings.openClawBaseURL)/v1/chat/completions") else { return nil }
