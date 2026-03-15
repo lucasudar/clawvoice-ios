@@ -15,8 +15,8 @@ final class OpenClawBridge {
 
     private var urlSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest  = 120
-        config.timeoutIntervalForResource = 300
+        config.timeoutIntervalForRequest  = 300   // 5 min — tool calls can take long (web search, LLM)
+        config.timeoutIntervalForResource = 600   // 10 min total
         return URLSession(configuration: config)
     }()
 
