@@ -113,6 +113,14 @@ struct SessionsDrawer: View {
                             .confirmationDialog("Delete all conversations?", isPresented: $showClearConfirm, titleVisibility: .visible) {
                                 Button("Delete All", role: .destructive) {
                                     store.clearAll()
+                                    close()
+                                    // Stop current session and start fresh
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                        session.stop()
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            session.start()
+                                        }
+                                    }
                                 }
                                 Button("Cancel", role: .cancel) {}
                             } message: {
