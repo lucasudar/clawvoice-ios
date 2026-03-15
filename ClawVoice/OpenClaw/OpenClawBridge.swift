@@ -104,12 +104,13 @@ final class OpenClawBridge {
         request.setValue("Bearer \(settings.openClawToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
 
-        let prompt = "Give a very short title (2-5 words, same language as input) for a voice conversation that started with this text: \"\(transcript.prefix(300))\". Reply with ONLY the title, no quotes, no punctuation at the end."
-        // Throwaway UUID — creates a tiny ephemeral session that doesn't appear in the ClawVoice UI
+        // Use the SAME session UUID — AI already has full context, no new session created.
+        // This exchange appears in session history but doesn't affect Gemini Live (separate WebSocket).
+        let prompt = "Based on this conversation, give a 2-5 word topic title in the same language. Reply with ONLY the title, no quotes, no punctuation."
         let body: [String: Any] = [
             "model":    "gpt-4o",
             "messages": [["role": "user", "content": prompt]],
-            "user":     "naming-\(UUID().uuidString)"
+            "user":     sessionId   // same session — AI knows the context
         ]
         guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         request.httpBody = httpBody
