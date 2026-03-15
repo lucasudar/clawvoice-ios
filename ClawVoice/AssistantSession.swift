@@ -179,6 +179,10 @@ final class AssistantSession: ObservableObject {
     }
 
     private func scheduleReconnect() {
+        // Cancel any in-flight reconnect task before scheduling a new one (prevents race)
+        reconnectTask?.cancel()
+        reconnectTask = nil
+
         guard reconnectAttempts < maxReconnectAttempts else {
             print("❌ [ClawVoice] Max reconnect attempts reached, giving up")
             let msg = "Connection to Gemini lost. Tap to reconnect."
@@ -365,7 +369,13 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             } else {
                 print("ℹ️ [ClawVoice] Gemini disconnected cleanly")
                 DebugLog.connection("DISCONNECT clean", sessionAge: age)
-                self.state = .idle
+                // Clean disconnect = Gemini session timeout (~10 min limit)
+                // Auto-reconnect if user was still active, otherwise idle
+                if self.state != .idle {
+                    self.scheduleReconnect()
+                } else {
+                    self.state = .idle
+                }
             }
         }
     }

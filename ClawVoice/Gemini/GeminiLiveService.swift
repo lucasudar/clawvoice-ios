@@ -26,6 +26,7 @@ final class GeminiLiveService: NSObject {
     private let sendQueue = DispatchQueue(label: "clawvoice.gemini.send", qos: .userInitiated)
     private var isReady = false  // true only after setup complete — guard audio sends
     private var pingTimer: Timer?  // keepalive — prevents Gemini from closing idle connection
+    private var disconnectFired = false  // dedup: prevent multiple disconnect callbacks per session
 
     // MARK: - Connect / Disconnect
 
@@ -37,6 +38,7 @@ final class GeminiLiveService: NSObject {
         // Without this, old receiveTask keeps reading a dead socket, throws an error,
         // and triggers a second geminiDidDisconnect → double scheduleReconnect cascade.
         isReady = false
+        disconnectFired = false  // reset dedup flag for new connection
         isModelSpeaking = false  // reset so audio isn't silently dropped if disconnect happened mid-speech
         stopPingTimer()
         receiveTask?.cancel()
@@ -79,7 +81,7 @@ final class GeminiLiveService: NSObject {
             guard let self else { return }
             let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
             print("🔴 [Gemini] WebSocket closed: code=\(code.rawValue) reason=\(r)")
-            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: nil) }
+            Task { @MainActor in self.fireDisconnect(error: nil) }
         }
 
         wsDelegate.onError = { [weak self] error in
@@ -87,7 +89,7 @@ final class GeminiLiveService: NSObject {
             let msg = error?.localizedDescription ?? "Unknown error"
             print("🔴 [Gemini] Error: \(msg)")
             let friendly = self.friendlyError(msg)
-            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: friendly) }
+            Task { @MainActor in self.fireDisconnect(error: friendly) }
         }
 
         webSocketTask = urlSession?.webSocketTask(with: url)
@@ -97,6 +99,17 @@ final class GeminiLiveService: NSObject {
     /// Reset speaking state — call on resume so stale isModelSpeaking doesn't block audio.
     func resetSpeakingState() {
         isModelSpeaking = false
+    }
+
+    /// Deduplicated disconnect — only fires delegate once per connection lifecycle
+    @MainActor
+    private func fireDisconnect(error: Error?) {
+        guard !disconnectFired else {
+            print("⚠️ [Gemini] Duplicate disconnect suppressed")
+            return
+        }
+        disconnectFired = true
+        delegate?.geminiDidDisconnect(error: error)
     }
 
     func disconnect() {
@@ -124,7 +137,7 @@ final class GeminiLiveService: NSObject {
                     if let error {
                         print("⚠️ [ClawVoice] WS ping failed: \(error) — triggering reconnect")
                         Task { @MainActor [weak self] in
-                            self?.delegate?.geminiDidDisconnect(error: error)
+                            self?.fireDisconnect(error: error)
                         }
                     }
                 }
@@ -241,7 +254,7 @@ final class GeminiLiveService: NSObject {
                     if !Task.isCancelled {
                         let msg = error.localizedDescription
                         await MainActor.run {
-                            self.delegate?.geminiDidDisconnect(error: self.friendlyError(msg))
+                            self.fireDisconnect(error: self.friendlyError(msg))
                         }
                     }
                     break
@@ -280,7 +293,7 @@ final class GeminiLiveService: NSObject {
         if let goAway = json["goAway"] as? [String: Any] {
             let secs = (goAway["timeLeft"] as? [String: Any])?["seconds"] as? Int ?? 0
             print("⚠️ [Gemini] GoAway: server closing in \(secs)s")
-            await MainActor.run { self.delegate?.geminiDidDisconnect(error: nil) }
+            await MainActor.run { self.fireDisconnect(error: nil) }
             return
         }
 
