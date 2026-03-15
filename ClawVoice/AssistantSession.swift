@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import UIKit
+import AudioToolbox
 
 /// Central coordinator: owns Gemini + Audio + ToolCallRouter.
 @MainActor
@@ -23,7 +24,7 @@ final class AssistantSession: ObservableObject {
             case .connecting:   return "Connecting…"
             case .listening:    return "Listening…"
             case .paused:       return "Paused · tap to resume"
-            case .thinking:     return "Working…"
+            case .thinking:     return "Processing…"
             case .speaking:     return "Speaking…"
             case .error(let e): return e
             }
@@ -51,6 +52,7 @@ final class AssistantSession: ObservableObject {
     private var userTurnActive = false            // true while user is speaking this turn
     @Published var lastError: String? = nil
     @Published var currentTask: String? = nil  // shown while executing tool calls
+    @Published var sessionStartTime: Date? = nil  // set on start(), cleared on stop()
 
     // MARK: - Private
 
@@ -63,17 +65,30 @@ final class AssistantSession: ObservableObject {
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
     private var reconnectTask: Task<Void, Never>?
+    private var sessionNamed = false    // true after session name is set
+    private var turnCount = 0           // counts completed turns for deferred naming
+    private var lastUserTurn = ""       // transcript of the most recent completed user turn
+    private var postToolSuppressUntil: Date = .distantPast  // suppress mic briefly after tool result sent
+
 
     // MARK: - Init
 
     init() {
         gemini.delegate = self
         observeSiriShortcut()
+        observeAppLifecycle()
+        DebugLog.setup()
     }
 
     // MARK: - Public API
 
     func toggle() {
+        // If a tool is in-flight and NOT already paused, force pause to prevent stop()/start()
+        // This guards against state being .connecting due to auto-reconnect during tool execution
+        if currentTask != nil && state != .paused {
+            pause()
+            return
+        }
         switch state {
         case .idle, .error:
             start()
@@ -92,8 +107,19 @@ final class AssistantSession: ObservableObject {
     }
 
     func resume() {
-        audio.resumeCapture()  // restarts engine + mic
-        state = .listening
+        if gemini.isConnected {
+            gemini.resetSpeakingState()  // clear stale isModelSpeaking so audio isn't blocked after pause
+            audio.resumeCapture()  // restarts engine + mic
+            state = .listening
+        } else {
+            // WebSocket died while paused — start a fresh connection instead of silently resuming into void
+            print("⚠️ [ClawVoice] Resume: Gemini not connected, starting fresh reconnect")
+            audio.stopCapture()
+            reconnectAttempts = 0
+            reconnectTask?.cancel()
+            state = .connecting
+            gemini.connect()
+        }
     }
 
     func start() {
@@ -111,28 +137,93 @@ final class AssistantSession: ObservableObject {
         awaitingNewAITurn = false
         userTurnActive = false
         lastError = nil
+        sessionNamed = false
+        turnCount = 0
+        lastUserTurn = ""
+        postToolSuppressUntil = .distantPast
+        sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
         OpenClawBridge.shared.resetSession()  // fresh context for new session
+        SessionStore.shared.beginSession(id: OpenClawBridge.shared.currentSessionId)
+        DebugLog.connection("START", sessionId: OpenClawBridge.shared.currentSessionId)
+        gemini.connect()
+    }
+
+    /// Resume a previous session by ID — preserves OpenClaw context server-side
+    func startResume(sessionId: String) {
+        guard state == .idle || {
+            if case .error = state { return true } else { return false }
+        }() else { return }
+
+        reconnectAttempts = 0
+        reconnectTask?.cancel()
+        userTranscript = ""
+        aiTranscript = ""
+        userBuffer = ""
+        aiBuffer = ""
+        transcriptFlushTask?.cancel()
+        awaitingNewAITurn = false
+        userTurnActive = false
+        lastError = nil
+        sessionNamed = true  // don't overwrite existing session name
+        turnCount = 0
+        sessionStartTime = Date()
+        state = .connecting
+        print("🟡 [ClawVoice] Resuming session \(sessionId.prefix(8))...")
+        OpenClawBridge.shared.restoreSession(id: sessionId)  // keep existing ID — NO resetSession()
+        DebugLog.connection("RESUME", sessionId: sessionId)
         gemini.connect()
     }
 
     func stop() {
         reconnectTask?.cancel()
         reconnectAttempts = 0
+        let age = sessionStartTime.map { Date().timeIntervalSince($0) }
+        DebugLog.connection("STOP", sessionId: OpenClawBridge.shared.currentSessionId, sessionAge: age)
+        SessionStore.shared.endSession(id: OpenClawBridge.shared.currentSessionId)
         gemini.disconnect()
         audio.stopCapture()
+        sessionStartTime = nil
+        userTranscript = ""
+        aiTranscript  = ""
+        userBuffer    = ""
+        aiBuffer      = ""
+        currentTask   = nil
         state = .idle
     }
 
     private func scheduleReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts else {
+        // Cancel any in-flight reconnect task before scheduling a new one (prevents race)
+        reconnectTask?.cancel()
+        reconnectTask = nil
+
+        // While a tool is in-flight, don't exhaust reconnect attempts — the tool needs the connection
+        guard reconnectAttempts < maxReconnectAttempts || currentTask != nil else {
             print("❌ [ClawVoice] Max reconnect attempts reached, giving up")
+            let msg = "Connection to Gemini lost. Tap to reconnect."
+            DebugLog.error("MAX_RECONNECT_REACHED | \(msg)")
+            lastError = msg
+            state = .error(msg)
+            return
+        }
+        // Don't increment counter while tool is running — save attempts for after tool completes
+        guard currentTask == nil else {
+            print("🔁 [ClawVoice] Tool in-flight — reconnecting without incrementing counter")
+            state = .connecting
+            reconnectTask = Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)  // fixed 2s delay during tool
+                guard !Task.isCancelled else { return }
+                await MainActor.run { self.gemini.connect() }
+            }
             return
         }
         reconnectAttempts += 1
         // Exponential backoff: 1s, 2s, 4s, 8s, 16s
         let delay = Double(1 << (reconnectAttempts - 1))
+        let age = sessionStartTime.map { Date().timeIntervalSince($0) }
+        DebugLog.connection("RECONNECT attempt=\(reconnectAttempts)/\(maxReconnectAttempts) delay=\(Int(delay))s",
+                            sessionId: OpenClawBridge.shared.currentSessionId, sessionAge: age)
         print("🔁 [ClawVoice] Reconnecting in \(Int(delay))s (attempt \(reconnectAttempts)/\(maxReconnectAttempts))...")
         state = .connecting
 
@@ -156,6 +247,29 @@ final class AssistantSession: ObservableObject {
             Task { @MainActor in self?.start() }
         }
     }
+
+    func observeAppLifecycle() {
+        NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                // If connection dropped while in background — reconnect on resume
+                // Reconnect on foreground only if actively in a non-paused state
+                // Never auto-reconnect from .paused — user must resume manually
+                if self.state == .connecting || self.state == .listening ||
+                   self.state == .speaking || self.state == .thinking {
+                    if !self.gemini.isConnected {
+                        print("📱 [ClawVoice] Foregrounded with dead connection — reconnecting")
+                        self.reconnectAttempts = 0
+                        self.scheduleReconnect()
+                    }
+                }
+            }
+        }
+    }
 }
 
 // MARK: - GeminiLiveServiceDelegate
@@ -164,15 +278,37 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidConnect() {
         Task { @MainActor in
-            self.reconnectAttempts = 0  // reset on successful connect
+            // Only reset reconnect counter after a stable connection (30s).
+            // Resetting immediately causes infinite loops during GoAway scenarios
+            // where setup completes but server closes with 1001 right after.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)  // 30s stable = real success
+                if self.state == .listening || self.state == .speaking || self.state == .thinking {
+                    self.reconnectAttempts = 0
+                }
+            }
+            self.lastError = nil        // dismiss error dialog on successful reconnect
+            DebugLog.connection("CONNECTED", sessionId: OpenClawBridge.shared.currentSessionId)
+            // Don't reconnect audio while paused — user paused intentionally
+            guard self.state != .paused else {
+                print("⏸ [ClawVoice] Connected but state=paused — not starting audio capture")
+                return
+            }
             self.state = .listening
             do {
                 try self.audio.startCapture { [weak self] chunk in
                     guard let self else { return }
-                    // Echo suppression: when using phone speaker, skip audio while model speaks.
-                    // With headphones: always send (AEC handles it, enables interruption).
-                    // headphonesConnected is cached on main thread — safe to read here.
-                    if self.gemini.isModelSpeaking && !self.audio.headphonesConnected { return }
+                    // Echo suppression (speaker only — headphones use AEC):
+                    // 1. While AI is speaking (isModelSpeaking)
+                    // 2. Brief window after tool result sent (echo drain before AI starts responding)
+                    // Block audio to Gemini during tool execution — prevents casual speech
+                    // from interrupting the tool and causing duplicate/loop tool calls.
+                    // User can still tap orb to pause if they want to cancel.
+                    if self.state == .thinking { return }
+                    if !self.audio.headphonesConnected {
+                        if self.gemini.isModelSpeaking { return }
+                        if Date() < self.postToolSuppressUntil { return }
+                    }
                     self.gemini.sendAudio(chunk)
                 }
             } catch {
@@ -183,7 +319,11 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAudio(_ data: Data) {
         Task { @MainActor in
-            if self.state != .speaking {
+            // New audio arriving = new model turn started, unblock playback.
+            self.audio.allowPlayback()
+            // Schedule audio even while paused — playerNode.pause() holds buffers for resume.
+            // Don't update visual state to .speaking while paused (user sees .paused).
+            if self.state != .paused && self.state != .speaking {
                 self.state = .speaking
             }
             self.audio.playAudio(data)
@@ -207,6 +347,7 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAIText(_ text: String) {
         Task { @MainActor in
+            guard self.state != .paused else { return }  // don't update text while paused
             if self.awaitingNewAITurn {
                 // New AI turn: clear previous AI text
                 self.aiTranscript = ""
@@ -249,18 +390,43 @@ extension AssistantSession: GeminiLiveServiceDelegate {
         Task { @MainActor in
             self.state = .thinking
             self.currentTask = args["task"] ?? name
+            AudioServicesPlayAlertSound(1105)   // "key_press_modifier" — tool start (louder, speaker)
             let result = await self.router.handle(id: id, name: name, args: args)
             self.currentTask = nil
+            // Always send tool response — if Gemini already moved on (1008), reconnect handles it.
+            // False interrupted signals from VAD were blocking valid results; reconnect is cheaper.
             self.gemini.sendToolResponse(id: id, output: result)
-            self.state = .listening
+            // Suppress mic for 800ms after tool result — gives Gemini time to start speaking
+            // without echo from previous AI speech interrupting the new response
+            self.postToolSuppressUntil = Date().addingTimeInterval(0.8)
+            AudioServicesPlayAlertSound(1054)   // "tweet" — tool done (distinct, speaker)
+            // Keep .thinking state — geminiDidReceiveAudio will switch to .speaking
         }
     }
 
     nonisolated func geminiDidTurnComplete(interrupted: Bool) {
         Task { @MainActor in
             print("✅ [ClawVoice] Turn complete, interrupted=\(interrupted)")
+            if interrupted {
+                // Drop all buffered AI audio — user spoke, Gemini is starting a new response
+                self.audio.clearPlayback()
+            }
             if self.state == .speaking || self.state == .thinking {
                 self.state = .listening
+            }
+            self.turnCount += 1
+            // Capture the most recent user turn for naming (reflects current topic)
+            if !self.userTranscript.isEmpty {
+                self.lastUserTurn = self.userTranscript
+            }
+            // Name after 2+ turns OR when last turn is substantial (≥40 chars)
+            if !self.sessionNamed && !self.lastUserTurn.isEmpty &&
+               (self.turnCount >= 2 || self.lastUserTurn.count >= 40) {
+                SessionStore.shared.nameSession(
+                    id: OpenClawBridge.shared.currentSessionId,
+                    from: self.lastUserTurn
+                )
+                self.sessionNamed = true
             }
             self.userTurnActive = false  // ready for next user input
         }
@@ -269,11 +435,16 @@ extension AssistantSession: GeminiLiveServiceDelegate {
     nonisolated func geminiDidDisconnect(error: Error?) {
         Task { @MainActor in
             self.audio.stopCapture()
+            let age = self.sessionStartTime.map { Date().timeIntervalSince($0) }
             if let error {
                 let msg = error.localizedDescription
                 print("❌ [ClawVoice] Gemini disconnected with error: \(msg)")
-                // Auto-reconnect if user was active (not manually stopped)
-                if self.state != .idle {
+                DebugLog.connection("DISCONNECT error=\(msg)",
+                                    sessionId: OpenClawBridge.shared.currentSessionId,
+                                    sessionAge: age)
+                // Auto-reconnect only if actively listening/speaking/thinking (not paused/idle)
+                if self.state == .listening || self.state == .speaking ||
+                   self.state == .thinking || self.state == .connecting {
                     self.scheduleReconnect()
                 } else {
                     self.lastError = msg
@@ -281,7 +452,15 @@ extension AssistantSession: GeminiLiveServiceDelegate {
                 }
             } else {
                 print("ℹ️ [ClawVoice] Gemini disconnected cleanly")
-                self.state = .idle
+                DebugLog.connection("DISCONNECT clean", sessionAge: age)
+                // Clean disconnect = Gemini session timeout (~10 min limit)
+                // Auto-reconnect only if actively in a session (not paused/idle)
+                if self.state == .listening || self.state == .speaking ||
+                   self.state == .thinking || self.state == .connecting {
+                    self.scheduleReconnect()
+                } else {
+                    self.state = .idle
+                }
             }
         }
     }

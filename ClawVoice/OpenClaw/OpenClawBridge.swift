@@ -10,12 +10,13 @@ final class OpenClawBridge {
 
     // Stable session ID — same value = same OpenClaw session (derived via `user` field)
     // OpenClaw maintains conversation history server-side, so we only send current message
-    private var sessionId: String = UUID().uuidString
+    private(set) var currentSessionId: String = UUID().uuidString
+    private var sessionId: String { currentSessionId }
 
     private var urlSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest  = 120
-        config.timeoutIntervalForResource = 300
+        config.timeoutIntervalForRequest  = 300   // 5 min — tool calls can take long (web search, LLM)
+        config.timeoutIntervalForResource = 600   // 10 min total
         return URLSession(configuration: config)
     }()
 
@@ -23,7 +24,12 @@ final class OpenClawBridge {
 
     /// Call when starting a new Gemini session — clears conversation history
     func resetSession() {
-        sessionId = UUID().uuidString  // new UUID = new OpenClaw session
+        currentSessionId = UUID().uuidString  // new UUID = new OpenClaw session
+    }
+
+    /// Restore a previous session by ID — OpenClaw will pick up its context server-side
+    func restoreSession(id: String) {
+        currentSessionId = id
     }
 
     // MARK: - Execute task
@@ -81,6 +87,43 @@ final class OpenClawBridge {
         req.timeoutInterval = 5
         req.setValue("Bearer \(settings.openClawToken)", forHTTPHeaderField: "Authorization")
         return (try? await urlSession.data(for: req)) != nil
+    }
+
+    // MARK: - Topic Name Generation
+
+    /// Generate a short 2-5 word topic name from user transcript.
+    /// Uses Gemini REST API directly (stateless, no session history pollution).
+    func generateTopicName(from transcript: String) async -> String? {
+        let apiKey = AppSettings.shared.geminiApiKey
+        guard !apiKey.isEmpty else { return nil }
+
+        let urlString = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=\(apiKey)"
+        guard let url = URL(string: urlString) else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 8
+
+        let prompt = "Give a very short title (2-5 words, same language as input) for a voice conversation that started with this text: \"\(transcript.prefix(300))\". Reply with ONLY the title, no quotes, no punctuation at the end."
+        let body: [String: Any] = [
+            "contents": [["parts": [["text": prompt]]]]
+        ]
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        request.httpBody = httpBody
+
+        guard let (data, _) = try? await urlSession.data(for: request) else { return nil }
+
+        // Gemini REST response: {"candidates":[{"content":{"parts":[{"text":"..."}]}}]}
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let candidates = json["candidates"] as? [[String: Any]],
+              let content = candidates.first?["content"] as? [String: Any],
+              let parts = content["parts"] as? [[String: Any]],
+              let text = parts.first?["text"] as? String else { return nil }
+
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     // MARK: - Errors

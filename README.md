@@ -9,6 +9,12 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/Status-In%20Development-yellow" alt="Status: In Development"/>
+  <img src="https://img.shields.io/badge/Platform-iOS-lightgrey" alt="Platform: iOS"/>
+  <img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"/>
+</p>
+
+<p align="center">
   <img src="assets/screenshot-speaking.jpg" width="200" alt="Speaking"/>
   &nbsp;&nbsp;&nbsp;
   <img src="assets/screenshot-settings-v2.png" width="200" alt="Settings"/>
@@ -174,7 +180,3 @@ No button tap needed. Works with screen off and any headphones paired with your 
 - **OpenClaw** `/v1/chat/completions` · one server session per voice session (new session on pause or app close)
 
 ---
-
-## License
-
-MIT

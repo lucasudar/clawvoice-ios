@@ -141,15 +141,14 @@ struct SiriShortcutGuideView: View {
                 step(3, "Tap **Add Action**, search for **ClawVoice**")
                 step(4, "Select **Activate Assistant**")
                 step(5, "Tap the shortcut name at the top → rename it (e.g. *Mr Krabs*)")
-                step(6, "Tap **Add to Siri** → record your phrase")
-                step(7, "Say **\"Hey Siri, Mr Krabs\"** — done!")
+                step(6, "Say **\"Hey Siri, Mr Krabs\"** — Siri picks up the shortcut name automatically, no recording needed!")
             }
 
             Section("Tips") {
                 Label("Works with screen off", systemImage: "iphone.slash")
-                Label("Works with AirPods", systemImage: "airpodspro")
+                Label("Works with any audio input — phone, AirPods, Meta glasses, Bluetooth headsets", systemImage: "headphones")
                 Label("Custom phrase = any language", systemImage: "globe")
-                Label("iPhone 15 Pro: also try Action Button", systemImage: "button.programmable")
+                Label("Action Button (if available): assign the shortcut there for instant tap launch", systemImage: "button.programmable")
             }
         }
         .navigationTitle("Hey Siri Setup")

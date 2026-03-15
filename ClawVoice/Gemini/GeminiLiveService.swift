@@ -26,10 +26,33 @@ final class GeminiLiveService: NSObject {
     private let sendQueue = DispatchQueue(label: "clawvoice.gemini.send", qos: .userInitiated)
     private var isReady = false  // true only after setup complete — guard audio sends
     private var pingTimer: Timer?  // keepalive — prevents Gemini from closing idle connection
+    private var disconnectFired = false   // dedup: prevent multiple disconnect callbacks per session
+    private var isConnecting = false      // guard: prevent parallel connect() calls
 
     // MARK: - Connect / Disconnect
 
+    /// Publicly readable connection state — use to check if WebSocket is alive before resuming.
+    var isConnected: Bool { isReady && webSocketTask != nil }
+
     func connect() {
+        guard !isConnecting else {
+            print("⚠️ [Gemini] connect() called while already connecting — ignored")
+            return
+        }
+        isConnecting = true
+        // Cancel any stale connection before starting a new one.
+        isReady = false
+        disconnectFired = false  // reset dedup flag for new connection
+        isModelSpeaking = false  // reset so audio isn't silently dropped if disconnect happened mid-speech
+        stopPingTimer()
+        receiveTask?.cancel()
+        receiveTask = nil
+        wsDelegate.onOpen  = nil   // nil handlers first so cancel doesn't re-fire delegates
+        wsDelegate.onClose = nil
+        wsDelegate.onError = nil
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+        webSocketTask = nil
+
         let apiKey = AppSettings.shared.geminiApiKey
         print("🔌 [Gemini] Connecting, model=\(AppSettings.shared.geminiModel), keyLen=\(apiKey.count)")
 
@@ -62,7 +85,7 @@ final class GeminiLiveService: NSObject {
             guard let self else { return }
             let r = reason.flatMap { String(data: $0, encoding: .utf8) } ?? "none"
             print("🔴 [Gemini] WebSocket closed: code=\(code.rawValue) reason=\(r)")
-            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: nil) }
+            Task { @MainActor in self.fireDisconnect(error: nil) }
         }
 
         wsDelegate.onError = { [weak self] error in
@@ -70,11 +93,28 @@ final class GeminiLiveService: NSObject {
             let msg = error?.localizedDescription ?? "Unknown error"
             print("🔴 [Gemini] Error: \(msg)")
             let friendly = self.friendlyError(msg)
-            Task { @MainActor in self.delegate?.geminiDidDisconnect(error: friendly) }
+            Task { @MainActor in self.fireDisconnect(error: friendly) }
         }
 
         webSocketTask = urlSession?.webSocketTask(with: url)
         webSocketTask?.resume()
+    }
+
+    /// Reset speaking state — call on resume so stale isModelSpeaking doesn't block audio.
+    func resetSpeakingState() {
+        isModelSpeaking = false
+    }
+
+    /// Deduplicated disconnect — only fires delegate once per connection lifecycle
+    @MainActor
+    private func fireDisconnect(error: Error?) {
+        guard !disconnectFired else {
+            print("⚠️ [Gemini] Duplicate disconnect suppressed")
+            return
+        }
+        disconnectFired = true
+        isConnecting = false   // allow reconnect after disconnect
+        delegate?.geminiDidDisconnect(error: error)
     }
 
     func disconnect() {
@@ -99,7 +139,12 @@ final class GeminiLiveService: NSObject {
             // Dispatch to MainActor to access main-actor-isolated webSocketTask
             Task { @MainActor [weak self] in
                 self?.webSocketTask?.sendPing { error in
-                    if let error { print("⚠️ [ClawVoice] WS ping failed: \(error)") }
+                    if let error {
+                        print("⚠️ [ClawVoice] WS ping failed: \(error) — triggering reconnect")
+                        Task { @MainActor [weak self] in
+                            self?.fireDisconnect(error: error)
+                        }
+                    }
                 }
             }
         }
@@ -214,7 +259,7 @@ final class GeminiLiveService: NSObject {
                     if !Task.isCancelled {
                         let msg = error.localizedDescription
                         await MainActor.run {
-                            self.delegate?.geminiDidDisconnect(error: self.friendlyError(msg))
+                            self.fireDisconnect(error: self.friendlyError(msg))
                         }
                     }
                     break
@@ -231,6 +276,7 @@ final class GeminiLiveService: NSObject {
             print("✅ [Gemini] Setup complete — ready!")
             await MainActor.run {
                 self.isReady = true
+                self.isConnecting = false  // allow new connect() after this one completes
                 self.startPingTimer()
                 self.delegate?.geminiDidConnect()
             }
@@ -253,7 +299,7 @@ final class GeminiLiveService: NSObject {
         if let goAway = json["goAway"] as? [String: Any] {
             let secs = (goAway["timeLeft"] as? [String: Any])?["seconds"] as? Int ?? 0
             print("⚠️ [Gemini] GoAway: server closing in \(secs)s")
-            await MainActor.run { self.delegate?.geminiDidDisconnect(error: nil) }
+            await MainActor.run { self.fireDisconnect(error: nil) }
             return
         }
 
@@ -262,7 +308,10 @@ final class GeminiLiveService: NSObject {
             // User interrupted model speech
             if let interrupted = serverContent["interrupted"] as? Bool, interrupted {
                 print("✋ [Gemini] Interrupted")
-                await MainActor.run { self.isModelSpeaking = false; self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: true) }
+                // Drain delay on interrupt too — echo from speaker needs time to dissipate
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                await MainActor.run { self.isModelSpeaking = false }
                 return
             }
 
@@ -299,7 +348,7 @@ final class GeminiLiveService: NSObject {
             if let turnComplete = serverContent["turnComplete"] as? Bool, turnComplete {
                 print("✅ [Gemini] Turn complete")
                 await MainActor.run { self.delegate?.geminiDidTurnComplete(interrupted: false) }
-                try? await Task.sleep(nanoseconds: 500_000_000)
+                try? await Task.sleep(nanoseconds: 800_000_000)
                 await MainActor.run { self.isModelSpeaking = false }
             }
         }
