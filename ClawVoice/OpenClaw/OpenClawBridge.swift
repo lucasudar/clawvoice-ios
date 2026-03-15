@@ -104,13 +104,17 @@ final class OpenClawBridge {
         request.setValue("Bearer \(settings.openClawToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
 
-        // Use the SAME session UUID — AI already has full context, no new session created.
-        // This exchange appears in session history but doesn't affect Gemini Live (separate WebSocket).
-        let prompt = "Based on this conversation, give a 2-5 word topic title in the same language. Reply with ONLY the title, no quotes, no punctuation."
+        // Include the actual transcript so the model has context even without prior tool calls.
+        let prompt = """
+        User said:
+        \(transcript)
+
+        Give a 2-5 word topic title in the same language as the text above. Reply with ONLY the title, no quotes, no punctuation.
+        """
         let body: [String: Any] = [
             "model":    "gpt-4o",
             "messages": [["role": "user", "content": prompt]],
-            "user":     sessionId   // same session — AI knows the context
+            "user":     sessionId
         ]
         guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         request.httpBody = httpBody

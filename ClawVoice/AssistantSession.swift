@@ -67,7 +67,7 @@ final class AssistantSession: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     private var sessionNamed = false    // true after session name is set
     private var turnCount = 0           // counts completed turns for deferred naming
-    private var lastUserTurn = ""       // transcript of the most recent completed user turn
+    private var recentUserTurns: [String] = []  // last 3 user turns for session naming
     private var postToolSuppressUntil: Date = .distantPast  // suppress mic briefly after tool result sent
 
 
@@ -139,7 +139,7 @@ final class AssistantSession: ObservableObject {
         lastError = nil
         sessionNamed = false
         turnCount = 0
-        lastUserTurn = ""
+        recentUserTurns = []
         postToolSuppressUntil = .distantPast
         sessionStartTime = Date()
         state = .connecting
@@ -415,16 +415,19 @@ extension AssistantSession: GeminiLiveServiceDelegate {
                 self.state = .listening
             }
             self.turnCount += 1
-            // Capture the most recent user turn for naming (reflects current topic)
+            // Accumulate last 3 user turns for naming (reflects conversation topic)
             if !self.userTranscript.isEmpty {
-                self.lastUserTurn = self.userTranscript
+                self.recentUserTurns.append(self.userTranscript)
+                if self.recentUserTurns.count > 3 { self.recentUserTurns.removeFirst() }
             }
             // Name after 2+ turns OR when last turn is substantial (≥40 chars)
-            if !self.sessionNamed && !self.lastUserTurn.isEmpty &&
-               (self.turnCount >= 2 || self.lastUserTurn.count >= 40) {
+            let latestTurn = self.recentUserTurns.last ?? ""
+            if !self.sessionNamed && !latestTurn.isEmpty &&
+               (self.turnCount >= 2 || latestTurn.count >= 40) {
+                let combinedTranscript = self.recentUserTurns.joined(separator: "\n")
                 SessionStore.shared.nameSession(
                     id: OpenClawBridge.shared.currentSessionId,
-                    from: self.lastUserTurn
+                    from: combinedTranscript
                 )
                 self.sessionNamed = true
             }
