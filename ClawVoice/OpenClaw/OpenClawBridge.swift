@@ -94,7 +94,6 @@ final class OpenClawBridge {
     /// Generate a short 2-5 word topic name from user transcript.
     /// Uses Gemini REST API directly (stateless, no session history pollution).
     func generateTopicName(from transcript: String) async -> String? {
-        print("🏷️ [TopicName] transcript (\(transcript.count) chars): \(transcript.prefix(120))")
         let settings = AppSettings.shared
         guard !settings.openClawToken.isEmpty else { return nil }
         guard let url = URL(string: "\(settings.openClawBaseURL)/v1/chat/completions") else { return nil }
@@ -120,28 +119,18 @@ final class OpenClawBridge {
         guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
         request.httpBody = httpBody
 
-        guard let (data, resp) = try? await urlSession.data(for: request) else {
-            print("⚠️ [TopicName] Network error")
-            return nil
-        }
-        if let http = resp as? HTTPURLResponse, http.statusCode != 200 {
-            print("⚠️ [TopicName] HTTP \(http.statusCode): \(String(data: data, encoding: .utf8)?.prefix(100) ?? "")")
-            return nil
-        }
+        guard let (data, resp) = try? await urlSession.data(for: request) else { return nil }
+        if let http = resp as? HTTPURLResponse, http.statusCode != 200 { return nil }
 
         struct Resp: Decodable {
             struct Choice: Decodable { struct Msg: Decodable { let content: String }; let message: Msg }
             let choices: [Choice]
         }
         guard let decoded = try? JSONDecoder().decode(Resp.self, from: data),
-              let text = decoded.choices.first?.message.content else {
-            print("⚠️ [TopicName] Unexpected response: \(String(data: data, encoding: .utf8)?.prefix(200) ?? "nil")")
-            return nil
-        }
+              let text = decoded.choices.first?.message.content else { return nil }
 
         let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-        print("✅ [TopicName] → \"\(cleaned)\"")
         return cleaned.isEmpty ? nil : cleaned
     }
 
