@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Status-In%20Development-yellow" alt="Status: In Development"/>
+  <img src="https://img.shields.io/badge/Version-1.2.0-brightgreen" alt="Version: 1.2.0"/>
   <img src="https://img.shields.io/badge/Platform-iOS-lightgrey" alt="Platform: iOS"/>
   <img src="https://img.shields.io/badge/License-MIT-blue" alt="License: MIT"/>
 </p>
@@ -47,6 +47,7 @@ ClawVoice uses **Gemini Live API** — a real-time bidirectional audio stream. Y
 - 🍎 **Hey Siri activation** — say *"Hey Siri, [your phrase]"* to launch and start listening immediately
 - 🔋 **Battery friendly** — minimal UI, no video, no camera, no polling
 - 🔐 **Private** — your keys, your server, no third-party cloud routing
+- 💬 **Session history** — conversations are saved and accessible from the sessions drawer; all data stays on your OpenClaw server
 
 ---
 
@@ -72,6 +73,8 @@ Your headphones or speaker
 ```
 
 **Session context:** each voice session maps to exactly one OpenClaw server session. The context accumulates naturally as you talk. Pause or close the app → next session starts fresh with a clean context.
+
+**Privacy:** ClawVoice does not store your conversations. All session history — messages, tool calls, responses — is stored exclusively on your own OpenClaw server. Nothing is sent to any third-party service except Google's Gemini Live API for real-time audio processing.
 
 ---
 
