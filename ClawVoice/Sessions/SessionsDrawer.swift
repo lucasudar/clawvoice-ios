@@ -27,12 +27,6 @@ struct SessionsDrawer: View {
                                 .font(.system(size: 22, weight: .bold, design: .rounded))
                                 .foregroundColor(.white)
                             Spacer()
-                            Button { close() } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 16, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.5))
-                                    .padding(8)
-                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 56)
@@ -61,11 +55,13 @@ struct SessionsDrawer: View {
 
                         // Session list
                         if store.sessions.isEmpty {
-                            VStack {
+                            VStack(spacing: 0) {
                                 Spacer()
                                 Text("No sessions yet")
                                     .font(.system(size: 14, design: .rounded))
                                     .foregroundColor(.white.opacity(0.3))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.horizontal, 20)
                                 Spacer()
                             }
                         } else {

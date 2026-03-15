@@ -65,8 +65,9 @@ final class AssistantSession: ObservableObject {
     private var reconnectAttempts = 0
     private let maxReconnectAttempts = 5
     private var reconnectTask: Task<Void, Never>?
-    private var sessionNamed = false  // true after session name is set
-    private var turnCount = 0          // counts completed turns for deferred naming
+    private var sessionNamed = false    // true after session name is set
+    private var turnCount = 0           // counts completed turns for deferred naming
+    private var lastUserTurn = ""       // transcript of the most recent completed user turn
 
     // MARK: - Init
 
@@ -129,6 +130,7 @@ final class AssistantSession: ObservableObject {
         lastError = nil
         sessionNamed = false
         turnCount = 0
+        lastUserTurn = ""
         sessionStartTime = Date()
         state = .connecting
         print("🟡 [ClawVoice] Connecting to Gemini...")
@@ -229,13 +231,10 @@ extension AssistantSession: GeminiLiveServiceDelegate {
             do {
                 try self.audio.startCapture { [weak self] chunk in
                     guard let self else { return }
-                    // Echo suppression: when using phone speaker, block mic while AI speaks OR
-                    // while processing a tool call (echo from previous speech still draining).
-                    // With headphones: AEC handles it — mic stays open so user can interrupt.
-                    if !self.audio.headphonesConnected {
-                        if self.gemini.isModelSpeaking { return }
-                        if self.state == .thinking { return }
-                    }
+                    // Echo suppression: block mic only while AI is actively speaking (no headphones).
+                    // During .thinking (tool execution) mic stays open so user can interrupt.
+                    // 800ms drain delay after speech ensures echo is gone by then.
+                    if self.gemini.isModelSpeaking && !self.audio.headphonesConnected { return }
                     self.gemini.sendAudio(chunk)
                 }
             } catch {
@@ -329,12 +328,16 @@ extension AssistantSession: GeminiLiveServiceDelegate {
                 self.state = .listening
             }
             self.turnCount += 1
-            // Name session after 2+ turns OR when transcript is long enough (≥40 chars)
-            if !self.sessionNamed && !self.userTranscript.isEmpty &&
-               (self.turnCount >= 2 || self.userTranscript.count >= 40) {
+            // Capture the most recent user turn for naming (reflects current topic)
+            if !self.userTranscript.isEmpty {
+                self.lastUserTurn = self.userTranscript
+            }
+            // Name after 2+ turns OR when last turn is substantial (≥40 chars)
+            if !self.sessionNamed && !self.lastUserTurn.isEmpty &&
+               (self.turnCount >= 2 || self.lastUserTurn.count >= 40) {
                 SessionStore.shared.nameSession(
                     id: OpenClawBridge.shared.currentSessionId,
-                    from: self.userTranscript
+                    from: self.lastUserTurn
                 )
                 self.sessionNamed = true
             }
