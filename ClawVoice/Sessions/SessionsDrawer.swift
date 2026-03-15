@@ -65,16 +65,13 @@ struct SessionsDrawer: View {
                                 Spacer()
                             }
                         } else {
-                            ScrollView {
-                                LazyVStack(alignment: .leading, spacing: 0) {
-                                    // Section header
+                            List {
+                                Section(header:
                                     Text("Recents")
                                         .font(.system(size: 12, weight: .semibold, design: .rounded))
                                         .foregroundColor(.white.opacity(0.35))
-                                        .padding(.horizontal, 20)
-                                        .padding(.top, 12)
-                                        .padding(.bottom, 4)
-
+                                        .textCase(nil)
+                                ) {
                                     ForEach(store.sessions) { record in
                                         SessionRow(
                                             record: record,
@@ -82,9 +79,17 @@ struct SessionsDrawer: View {
                                             onTap: { resumeSession(record) },
                                             onDelete: { store.deleteSession(id: record.id) }
                                         )
+                                        .listRowBackground(record.id == currentSessionId
+                                            ? Color.white.opacity(0.06)
+                                            : Color(white: 0.08))
+                                        .listRowInsets(EdgeInsets())
+                                        .listRowSeparator(.hidden)
                                     }
                                 }
                             }
+                            .listStyle(.plain)
+                            .scrollContentBackground(.hidden)
+                            .background(Color(white: 0.08))
                         }
 
                         Spacer()
