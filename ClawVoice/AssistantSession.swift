@@ -83,9 +83,9 @@ final class AssistantSession: ObservableObject {
     // MARK: - Public API
 
     func toggle() {
-        // If a tool is in-flight, always pause — state may be .connecting due to auto-reconnect
-        // but we don't want to stop() and lose the tool response
-        if currentTask != nil {
+        // If a tool is in-flight and NOT already paused, force pause to prevent stop()/start()
+        // This guards against state being .connecting due to auto-reconnect during tool execution
+        if currentTask != nil && state != .paused {
             pause()
             return
         }
