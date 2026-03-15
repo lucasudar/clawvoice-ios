@@ -202,24 +202,26 @@ final class AudioManager {
         // Engine must keep running so playerNode can play Gemini's audio
     }
 
-    /// User-initiated pause: stop AI audio immediately and halt mic sending.
-    /// Engine keeps running so VAD stays calibrated and resumes cleanly.
+    /// User-initiated pause: pause AI audio (buffers preserved) and halt mic sending.
+    /// playerNode.pause() keeps scheduled buffers so resume continues from the same point.
     func pauseCapture() {
         isUserPaused = true
-        playerNode.stop()  // cut AI audio immediately on pause
+        playerNode.pause()  // preserve scheduled buffers — resume continues from here
     }
 
-    /// User-initiated resume: clear pause flag — audio immediately flows to Gemini again.
+    /// User-initiated resume: clear pause flag — audio continues from pause point.
     func resumeCapture() {
         isUserPaused = false
-        if !playerNode.isPlaying { playerNode.play() }  // re-arm player for incoming AI audio
+        playerNode.play()  // continue playing buffered AI audio
     }
 
 
 
     /// Schedule a chunk of PCM Int16 24kHz audio for gapless playback.
     func playAudio(_ data: Data) {
-        guard isCapturing, !data.isEmpty, !isUserPaused else { return }
+        guard isCapturing, !data.isEmpty else { return }
+        // Note: don't guard on isUserPaused — still schedule buffers while paused.
+        // playerNode.pause() holds them; playerNode.play() on resume continues from here.
 
         let playerFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
                                           sampleRate: outputSampleRate,
@@ -242,7 +244,8 @@ final class AudioManager {
         }
 
         playerNode.scheduleBuffer(buffer)
-        if !playerNode.isPlaying { playerNode.play() }
+        // Only auto-play if not user-paused (paused = buffering for later resume)
+        if !isUserPaused && !playerNode.isPlaying { playerNode.play() }
     }
 
     // MARK: - Private helpers

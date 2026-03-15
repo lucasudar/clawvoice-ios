@@ -291,8 +291,9 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAudio(_ data: Data) {
         Task { @MainActor in
-            guard self.state != .paused else { return }  // drop audio while paused — avoids main thread pileup
-            if self.state != .speaking {
+            // Schedule audio even while paused — playerNode.pause() holds buffers for resume.
+            // Don't update visual state to .speaking while paused (user sees .paused).
+            if self.state != .paused && self.state != .speaking {
                 self.state = .speaking
             }
             self.audio.playAudio(data)
@@ -316,6 +317,7 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidReceiveAIText(_ text: String) {
         Task { @MainActor in
+            guard self.state != .paused else { return }  // don't update text while paused
             if self.awaitingNewAITurn {
                 // New AI turn: clear previous AI text
                 self.aiTranscript = ""
