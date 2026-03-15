@@ -254,7 +254,15 @@ extension AssistantSession: GeminiLiveServiceDelegate {
 
     nonisolated func geminiDidConnect() {
         Task { @MainActor in
-            self.reconnectAttempts = 0  // reset on successful connect
+            // Only reset reconnect counter after a stable connection (30s).
+            // Resetting immediately causes infinite loops during GoAway scenarios
+            // where setup completes but server closes with 1001 right after.
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 30_000_000_000)  // 30s stable = real success
+                if self.state == .listening || self.state == .speaking || self.state == .thinking {
+                    self.reconnectAttempts = 0
+                }
+            }
             self.lastError = nil        // dismiss error dialog on successful reconnect
             DebugLog.connection("CONNECTED", sessionId: OpenClawBridge.shared.currentSessionId)
             // Don't reconnect audio while paused — user paused intentionally

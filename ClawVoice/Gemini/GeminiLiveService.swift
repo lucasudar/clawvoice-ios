@@ -26,7 +26,8 @@ final class GeminiLiveService: NSObject {
     private let sendQueue = DispatchQueue(label: "clawvoice.gemini.send", qos: .userInitiated)
     private var isReady = false  // true only after setup complete — guard audio sends
     private var pingTimer: Timer?  // keepalive — prevents Gemini from closing idle connection
-    private var disconnectFired = false  // dedup: prevent multiple disconnect callbacks per session
+    private var disconnectFired = false   // dedup: prevent multiple disconnect callbacks per session
+    private var isConnecting = false      // guard: prevent parallel connect() calls
 
     // MARK: - Connect / Disconnect
 
@@ -34,9 +35,12 @@ final class GeminiLiveService: NSObject {
     var isConnected: Bool { isReady && webSocketTask != nil }
 
     func connect() {
+        guard !isConnecting else {
+            print("⚠️ [Gemini] connect() called while already connecting — ignored")
+            return
+        }
+        isConnecting = true
         // Cancel any stale connection before starting a new one.
-        // Without this, old receiveTask keeps reading a dead socket, throws an error,
-        // and triggers a second geminiDidDisconnect → double scheduleReconnect cascade.
         isReady = false
         disconnectFired = false  // reset dedup flag for new connection
         isModelSpeaking = false  // reset so audio isn't silently dropped if disconnect happened mid-speech
@@ -109,6 +113,7 @@ final class GeminiLiveService: NSObject {
             return
         }
         disconnectFired = true
+        isConnecting = false   // allow reconnect after disconnect
         delegate?.geminiDidDisconnect(error: error)
     }
 
@@ -271,6 +276,7 @@ final class GeminiLiveService: NSObject {
             print("✅ [Gemini] Setup complete — ready!")
             await MainActor.run {
                 self.isReady = true
+                self.isConnecting = false  // allow new connect() after this one completes
                 self.startPingTimer()
                 self.delegate?.geminiDidConnect()
             }
