@@ -66,15 +66,25 @@ final class SessionStore: ObservableObject {
         save()
     }
 
-    /// Called with first user message to auto-name the session
-    func nameSession(id: String, from firstMessage: String) {
+    /// Called with user turn transcript — sets a placeholder then generates a smart topic name via API
+    func nameSession(id: String, from transcript: String) {
         guard let idx = sessions.firstIndex(where: { $0.id == id }) else { return }
-        // Trim to ~30 chars for display
-        let trimmed = firstMessage.trimmingCharacters(in: .whitespacesAndNewlines)
-        let name = trimmed.count > 30 ? String(trimmed.prefix(28)) + "…" : trimmed
-        guard !name.isEmpty else { return }
-        sessions[idx].name = name
+        let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Set truncated placeholder immediately
+        let placeholder = trimmed.count > 32 ? String(trimmed.prefix(30)) + "…" : trimmed
+        sessions[idx].name = placeholder
         save()
+        // Async: generate a smart 3-5 word topic name in background
+        Task {
+            if let smart = await OpenClawBridge.shared.generateTopicName(from: trimmed) {
+                await MainActor.run {
+                    guard let i = self.sessions.firstIndex(where: { $0.id == id }) else { return }
+                    self.sessions[i].name = smart
+                    self.save()
+                }
+            }
+        }
     }
 
     func deleteSession(id: String) {

@@ -89,6 +89,44 @@ final class OpenClawBridge {
         return (try? await urlSession.data(for: req)) != nil
     }
 
+    // MARK: - Topic Name Generation
+
+    /// Generate a short 2-5 word topic name from user transcript.
+    /// Uses a throwaway session UUID so it doesn't pollute the main conversation context.
+    func generateTopicName(from transcript: String) async -> String? {
+        let settings = AppSettings.shared
+        guard !settings.openClawBaseURL.isEmpty, !settings.openClawToken.isEmpty else { return nil }
+        guard let url = URL(string: "\(settings.openClawBaseURL)/v1/chat/completions") else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(settings.openClawToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 8
+
+        let prompt = "Give a very short title (2-5 words, same language as text) for a voice conversation that started with: \"\(transcript.prefix(200))\". Reply with ONLY the title, no punctuation."
+        let body: [String: Any] = [
+            "model":    "gpt-4o",
+            "messages": [["role": "user", "content": prompt]],
+            "user":     UUID().uuidString  // throwaway — no context pollution
+        ]
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else { return nil }
+        request.httpBody = httpBody
+
+        guard let (data, _) = try? await urlSession.data(for: request) else { return nil }
+
+        struct Resp: Decodable {
+            struct Choice: Decodable { struct Msg: Decodable { let content: String }; let message: Msg }
+            let choices: [Choice]
+        }
+        guard let decoded = try? JSONDecoder().decode(Resp.self, from: data),
+              let name = decoded.choices.first?.message.content else { return nil }
+
+        let cleaned = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        return cleaned.isEmpty ? nil : cleaned
+    }
+
     // MARK: - Errors
 
     enum OpenClawError: LocalizedError {
