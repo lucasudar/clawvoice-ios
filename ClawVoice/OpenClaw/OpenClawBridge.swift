@@ -53,7 +53,7 @@ final class OpenClawBridge {
 
         // Only send current message — OpenClaw maintains session context server-side via `user` UUID
         let body: [String: Any] = [
-            "model":    "gpt-4o",
+            "model":    "openclaw",
             "messages": [["role": "user", "content": task]],
             "user":     sessionId
         ]
@@ -112,7 +112,7 @@ final class OpenClawBridge {
         Give a 2-5 word topic title in the same language as the text above. Reply with ONLY the title, no quotes, no punctuation.
         """
         let body: [String: Any] = [
-            "model":    "gpt-4o",
+            "model":    "openclaw",
             "messages": [["role": "user", "content": prompt]],
             "user":     sessionId
         ]
